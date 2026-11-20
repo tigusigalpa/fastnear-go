@@ -37,13 +37,22 @@ func TestPaths(t *testing.T) {
 		{"ft_contracts", "/v0/account/root.near/ft", func(c *Client) error { _, e := c.FTContracts(context.Background(), "root.near"); return e }},
 		{"nft_contracts", "/v0/account/root.near/nft", func(c *Client) error { _, e := c.NFTContracts(context.Background(), "root.near"); return e }},
 		{"staking_pools", "/v0/account/root.near/staking", func(c *Client) error { _, e := c.StakingPools(context.Background(), "root.near"); return e }},
-		{"pk_legacy", "/v0/public_key/ed25519:AbC", func(c *Client) error { _, e := c.PublicKeyAccountsLegacy(context.Background(), "ed25519:AbC"); return e }},
-		{"pk_all_legacy", "/v0/public_key/ed25519:AbC/all", func(c *Client) error { _, e := c.PublicKeyAccountsAllLegacy(context.Background(), "ed25519:AbC"); return e }},
+		{"pk_legacy", "/v0/public_key/ed25519:AbC", func(c *Client) error {
+			_, e := c.PublicKeyAccountsLegacy(context.Background(), "ed25519:AbC")
+			return e
+		}},
+		{"pk_all_legacy", "/v0/public_key/ed25519:AbC/all", func(c *Client) error {
+			_, e := c.PublicKeyAccountsAllLegacy(context.Background(), "ed25519:AbC")
+			return e
+		}},
 		{"ft_balances", "/v1/account/root.near/ft", func(c *Client) error { _, e := c.FTBalances(context.Background(), "root.near"); return e }},
 		{"account_full", "/v1/account/root.near/full", func(c *Client) error { _, e := c.AccountFull(context.Background(), "root.near"); return e }},
 		{"nft_holdings", "/v1/account/root.near/nft", func(c *Client) error { _, e := c.NFTHoldings(context.Background(), "root.near"); return e }},
 		{"staking", "/v1/account/root.near/staking", func(c *Client) error { _, e := c.Staking(context.Background(), "root.near"); return e }},
-		{"ft_top", "/v1/ft/usdt.tether-token.near/top", func(c *Client) error { _, e := c.FTTopHolders(context.Background(), "usdt.tether-token.near"); return e }},
+		{"ft_top", "/v1/ft/usdt.tether-token.near/top", func(c *Client) error {
+			_, e := c.FTTopHolders(context.Background(), "usdt.tether-token.near")
+			return e
+		}},
 		{"pk", "/v1/public_key/ed25519:AbC", func(c *Client) error { _, e := c.PublicKeyAccounts(context.Background(), "ed25519:AbC"); return e }},
 		{"pk_all", "/v1/public_key/ed25519:AbC/all", func(c *Client) error { _, e := c.PublicKeyAccountsAll(context.Background(), "ed25519:AbC"); return e }},
 	}

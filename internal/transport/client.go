@@ -52,6 +52,10 @@ type Params struct {
 	ConfigErr error
 	// Middleware hooks, invoked per attempt.
 	Middleware []Middleware
+	// RedirectHostSuffixes lists host suffixes (e.g. ".neardata.xyz")
+	// a cross-host redirect may target. Any other cross-host redirect
+	// is refused, so credentials never leave the allowed domain set.
+	RedirectHostSuffixes []string
 }
 
 // Client executes requests against one family base URL. It is safe for
@@ -70,6 +74,7 @@ type Client struct {
 	configErr  error
 	middleware []Middleware
 	ownsClient bool
+	redirHosts []string
 }
 
 // New builds a transport client. When Params.HTTPClient is nil a
@@ -87,6 +92,9 @@ func New(p Params) *Client {
 		maxBytes:   p.MaxBytes,
 		configErr:  p.ConfigErr,
 		middleware: p.Middleware,
+	}
+	for _, s := range p.RedirectHostSuffixes {
+		c.redirHosts = append(c.redirHosts, strings.ToLower(s))
 	}
 	if c.ua == "" {
 		c.ua = "fastnear-go/1.0.0 (+https://github.com/tigusigalpa/fastnear-go)"
@@ -277,21 +285,27 @@ func (c *Client) readBody(resp *http.Response) ([]byte, error) {
 }
 
 // buildURL joins base URL, encoded segments and query; appends apiKey
-// last when query auth is active.
+// last when query auth is active. The path is concatenated verbatim so
+// segment escaping happens exactly once (assigning to url.URL.Path
+// would re-encode '%').
 func (c *Client) buildURL(r Request) (string, error) {
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
+	if _, err := url.Parse(c.baseURL); err != nil {
 		return "", err
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + BuildPath(r.Segments...)
-	u.RawPath = ""
+	var b strings.Builder
+	b.Grow(len(c.baseURL) + 64)
+	b.WriteString(c.baseURL)
+	b.WriteString(BuildPath(r.Segments...))
 	q := make(Query, 0, len(r.Query)+1)
 	q = append(q, r.Query...)
 	if c.authMode == AuthQuery && c.apiKey != "" {
 		q.Set("apiKey", c.apiKey)
 	}
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	if qs := q.Encode(); qs != "" {
+		b.WriteByte('?')
+		b.WriteString(qs)
+	}
+	return b.String(), nil
 }
 
 // checkRedirect allows at most 5 same-host redirects, preserves auth,
@@ -306,7 +320,7 @@ func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
 		return errors.New("fastnear: too many redirects")
 	}
 	prev := via[len(via)-1]
-	if !strings.EqualFold(req.URL.Host, prev.URL.Host) {
+	if !strings.EqualFold(req.URL.Host, prev.URL.Host) && !c.redirectHostAllowed(req.URL.Hostname()) {
 		return http.ErrUseLastResponse
 	}
 	// Re-attach apiKey on redirect when query auth is in use; the
@@ -319,6 +333,19 @@ func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
 		}
 	}
 	return nil
+}
+
+// redirectHostAllowed reports whether a cross-host redirect target is
+// within the configured suffix allowlist (e.g. ".mainnet.neardata.xyz"
+// allows "a0.mainnet.neardata.xyz" but not "evilmainnet.neardata.xyz").
+func (c *Client) redirectHostAllowed(host string) bool {
+	host = strings.ToLower(host)
+	for _, s := range c.redirHosts {
+		if strings.HasSuffix(host, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // log emits one slog record per attempt without secrets.

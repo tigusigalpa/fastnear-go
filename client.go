@@ -3,6 +3,7 @@ package fastnear
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -199,6 +200,14 @@ func (c *Client) transportFor(f Family) (*transport.Client, error) {
 	if c.httpClient == nil {
 		c.httpClient = c.cfg.httpClient
 	}
+	// NEAR Data redirects to sibling mirror hosts (a0.<host>, …);
+	// allow cross-host redirects within the configured host's domain.
+	var redirHosts []string
+	if f == FamilyData {
+		if u, perr := url.Parse(baseURL); perr == nil && u.Hostname() != "" {
+			redirHosts = []string{"." + u.Hostname()}
+		}
+	}
 	t := transport.New(transport.Params{
 		HTTPClient: c.httpClient,
 		BaseURL:    baseURL,
@@ -213,10 +222,11 @@ func (c *Client) transportFor(f Family) (*transport.Client, error) {
 			Budget:             15 * time.Second,
 			RetryNonIdempotent: c.cfg.retryNonIdem,
 		},
-		Logger:     c.cfg.logger,
-		UserAgent:  c.cfg.userAgent,
-		MaxBytes:   c.cfg.maxResponseBytes,
-		Middleware: c.cfg.middleware,
+		Logger:               c.cfg.logger,
+		UserAgent:            c.cfg.userAgent,
+		MaxBytes:             c.cfg.maxResponseBytes,
+		Middleware:           c.cfg.middleware,
+		RedirectHostSuffixes: redirHosts,
 	})
 	c.transports[f] = t
 	return t, nil
