@@ -1,0 +1,18 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - errcheck
+    - gocritic
+    - govet
+    - misspell
+    - revive
+    - staticcheck
+    - unparam
+run:
+  timeout: 5m
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
