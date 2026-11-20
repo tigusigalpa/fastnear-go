@@ -247,7 +247,7 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 
 	// Deliberately unfollowed redirect is a successful response.
 	if r.NoFollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return &Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, EffectiveURL: resp.Request.URL.String()}, nil
+		return &Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, EffectiveURL: scrubKey(resp.Request.URL.String())}, nil
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		return nil, &fastnearerr.Error{
@@ -259,7 +259,7 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, ErrorFromResponse(r.Op, c.family, scrubbedURL, resp, body)
 	}
-	return &Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, EffectiveURL: resp.Request.URL.String()}, nil
+	return &Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, EffectiveURL: scrubKey(resp.Request.URL.String())}, nil
 }
 
 // readBody enforces the configured response-size cap.
