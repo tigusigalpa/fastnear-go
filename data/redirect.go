@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -14,7 +15,7 @@ import (
 // Absolute URLs with the same suffix are also accepted.
 func parseLocationHeight(location string) (uint64, error) {
 	if location == "" {
-		return 0, fmt.Errorf("missing Location header")
+		return 0, errors.New("missing Location header")
 	}
 	// Strip scheme://host if the Location is absolute.
 	if i := strings.Index(location, "://"); i >= 0 {

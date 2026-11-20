@@ -1,6 +1,7 @@
 package fastnear
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,7 +20,7 @@ type Option func(*Config) error
 func WithAPIKey(key string) Option {
 	return func(c *Config) error {
 		if strings.ContainsAny(key, " \t\r\n") {
-			return fmt.Errorf("fastnear: api key must not contain whitespace")
+			return errors.New("fastnear: api key must not contain whitespace")
 		}
 		c.apiKey = key
 		return nil
@@ -66,7 +67,7 @@ func WithAuthMode(m AuthMode) Option {
 func WithTimeout(d time.Duration) Option {
 	return func(c *Config) error {
 		if d <= 0 {
-			return fmt.Errorf("fastnear: timeout must be positive")
+			return errors.New("fastnear: timeout must be positive")
 		}
 		c.timeout = d
 		return nil
@@ -78,7 +79,7 @@ func WithTimeout(d time.Duration) Option {
 func WithConnectTimeout(d time.Duration) Option {
 	return func(c *Config) error {
 		if d <= 0 {
-			return fmt.Errorf("fastnear: connect timeout must be positive")
+			return errors.New("fastnear: connect timeout must be positive")
 		}
 		c.connectTimeout = d
 		return nil
@@ -90,7 +91,7 @@ func WithConnectTimeout(d time.Duration) Option {
 func WithMaxRetries(n int) Option {
 	return func(c *Config) error {
 		if n < 0 {
-			return fmt.Errorf("fastnear: max retries must be >= 0")
+			return errors.New("fastnear: max retries must be >= 0")
 		}
 		c.maxRetries = n
 		return nil
@@ -101,7 +102,7 @@ func WithMaxRetries(n int) Option {
 func WithRetryBaseDelay(d time.Duration) Option {
 	return func(c *Config) error {
 		if d <= 0 {
-			return fmt.Errorf("fastnear: retry base delay must be positive")
+			return errors.New("fastnear: retry base delay must be positive")
 		}
 		c.retryBaseDelay = d
 		return nil
@@ -113,7 +114,7 @@ func WithRetryBaseDelay(d time.Duration) Option {
 func WithMaxResponseBytes(n int64) Option {
 	return func(c *Config) error {
 		if n <= 0 {
-			return fmt.Errorf("fastnear: max response bytes must be positive")
+			return errors.New("fastnear: max response bytes must be positive")
 		}
 		c.maxResponseBytes = n
 		return nil
@@ -126,7 +127,7 @@ func WithMaxResponseBytes(n int64) Option {
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Config) error {
 		if hc == nil {
-			return fmt.Errorf("fastnear: http client must not be nil")
+			return errors.New("fastnear: http client must not be nil")
 		}
 		c.httpClient = hc
 		return nil
@@ -154,7 +155,7 @@ func WithBaseURL(f Family, rawURL string) Option {
 func WithUserAgent(ua string) Option {
 	return func(c *Config) error {
 		if ua == "" {
-			return fmt.Errorf("fastnear: user agent must not be empty")
+			return errors.New("fastnear: user agent must not be empty")
 		}
 		c.userAgent = ua
 		return nil

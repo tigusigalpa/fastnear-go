@@ -8,6 +8,7 @@ package tx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -105,17 +106,17 @@ func (c *Client) Block(ctx context.Context, blockID any, withTransactions, withR
 		id = v
 	case int:
 		if v < 0 {
-			return nil, validateErr("block", fmt.Errorf("block_id must be >= 0"))
+			return nil, validateErr("block", errors.New("block_id must be >= 0"))
 		}
 		id = uint64(v)
 	case int64:
 		if v < 0 {
-			return nil, validateErr("block", fmt.Errorf("block_id must be >= 0"))
+			return nil, validateErr("block", errors.New("block_id must be >= 0"))
 		}
 		id = uint64(v)
 	case string:
 		if v == "" {
-			return nil, validateErr("block", fmt.Errorf("block_id must not be empty"))
+			return nil, validateErr("block", errors.New("block_id must not be empty"))
 		}
 		id = v
 	default:
@@ -158,7 +159,7 @@ func (c *Client) Blocks(ctx context.Context, q BlocksQuery) (*BlocksPage, error)
 // See https://docs.fastnear.com/tx/receipt
 func (c *Client) Receipt(ctx context.Context, receiptID string) (*ReceiptPage, error) {
 	if receiptID == "" {
-		return nil, validateErr("receipt", fmt.Errorf("receipt_id must not be empty"))
+		return nil, validateErr("receipt", errors.New("receipt_id must not be empty"))
 	}
 	return post[ReceiptPage](c, ctx, "receipt", []string{"v0", "receipt"}, map[string]any{"receipt_id": receiptID})
 }
@@ -167,7 +168,7 @@ func (c *Client) Receipt(ctx context.Context, receiptID string) (*ReceiptPage, e
 // See https://docs.fastnear.com/tx/transactions
 func (c *Client) Transactions(ctx context.Context, txHashes []string) (*TransactionsPage, error) {
 	if len(txHashes) == 0 {
-		return nil, validateErr("transactions", fmt.Errorf("tx_hashes must not be empty"))
+		return nil, validateErr("transactions", errors.New("tx_hashes must not be empty"))
 	}
 	if len(txHashes) > 20 {
 		return nil, validateErr("transactions", fmt.Errorf("tx_hashes is limited to 20, got %d", len(txHashes)))

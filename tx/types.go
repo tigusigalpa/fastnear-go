@@ -2,6 +2,7 @@ package tx
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
@@ -239,7 +240,7 @@ type TransactionsPage struct {
 // validateQuery checks AccountHistoryQuery constraints.
 func validateQuery(q AccountHistoryQuery) error {
 	if q.AccountID == "" {
-		return fmt.Errorf("account_id must not be empty")
+		return errors.New("account_id must not be empty")
 	}
 	if q.Limit != nil && (*q.Limit < 1 || *q.Limit > 200) {
 		return fmt.Errorf("limit must be in [1, 200], got %d", *q.Limit)

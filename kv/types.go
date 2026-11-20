@@ -2,6 +2,7 @@ package kv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
@@ -80,7 +81,7 @@ type HistoryQuery struct {
 
 func (q LatestQuery) validate() error {
 	if q.Key != nil && q.KeyPrefix != nil {
-		return fmt.Errorf("key and key_prefix are mutually exclusive")
+		return errors.New("key and key_prefix are mutually exclusive")
 	}
 	if q.Limit != nil && (*q.Limit < 1 || *q.Limit > 200) {
 		return fmt.Errorf("limit must be in [1, 200], got %d", *q.Limit)
@@ -90,7 +91,7 @@ func (q LatestQuery) validate() error {
 
 func (q HistoryQuery) validate() error {
 	if q.Key != nil && q.KeyPrefix != nil {
-		return fmt.Errorf("key and key_prefix are mutually exclusive")
+		return errors.New("key and key_prefix are mutually exclusive")
 	}
 	if q.Limit != nil && (*q.Limit < 1 || *q.Limit > 200) {
 		return fmt.Errorf("limit must be in [1, 200], got %d", *q.Limit)

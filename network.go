@@ -1,6 +1,9 @@
 package fastnear
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Network selects the NEAR deployment the client talks to.
 type Network string
@@ -99,7 +102,7 @@ func (f Family) BaseURL(n Network, archival bool) (string, error) {
 	u, ok := byNet[n]
 	if !ok {
 		if f == FamilyTransfers {
-			return "", fmt.Errorf("fastnear: Transfers API is mainnet-only; testnet is not supported")
+			return "", errors.New("fastnear: Transfers API is mainnet-only; testnet is not supported")
 		}
 		return "", fmt.Errorf("fastnear: family %q does not support network %q", f, n)
 	}

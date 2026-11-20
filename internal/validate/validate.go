@@ -4,6 +4,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -20,13 +21,13 @@ var publicKeyPrefixes = []string{
 // characters, no whitespace and no '/'.
 func AccountID(id string) error {
 	if id == "" {
-		return fmt.Errorf("account_id must not be empty")
+		return errors.New("account_id must not be empty")
 	}
 	if len(id) > 64 {
 		return fmt.Errorf("account_id must be at most 64 characters, got %d", len(id))
 	}
 	if strings.ContainsAny(id, " \t\r\n/") {
-		return fmt.Errorf("account_id must not contain whitespace or '/'")
+		return errors.New("account_id must not contain whitespace or '/'")
 	}
 	return nil
 }
@@ -36,7 +37,7 @@ func AccountID(id string) error {
 // "ml-dsa-65-hash:...").
 func PublicKey(pk string) error {
 	if pk == "" {
-		return fmt.Errorf("public_key must not be empty")
+		return errors.New("public_key must not be empty")
 	}
 	for _, p := range publicKeyPrefixes {
 		if strings.HasPrefix(pk, p) && len(pk) > len(p) {

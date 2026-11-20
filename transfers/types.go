@@ -1,6 +1,7 @@
 package transfers
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
@@ -45,7 +46,7 @@ type Query struct {
 
 func (q Query) validate() error {
 	if q.AccountID == "" {
-		return fmt.Errorf("account_id must not be empty")
+		return errors.New("account_id must not be empty")
 	}
 	if q.Direction != DirectionSender && q.Direction != DirectionReceiver {
 		return fmt.Errorf("direction must be \"sender\" or \"receiver\", got %q", q.Direction)
