@@ -45,7 +45,7 @@ func (c *Client) guard(op string) error {
 
 // Query returns one page of asset transfers.
 // See https://docs.fastnear.com/transfers/query
-func (c *Client) Query(ctx context.Context, q Query) (*TransfersPage, error) {
+func (c *Client) Query(ctx context.Context, q Query) (*Page, error) {
 	if err := c.guard("query"); err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (c *Client) Query(ctx context.Context, q Query) (*TransfersPage, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &TransfersPage{}
+	out := &Page{}
 	ok, err := transport.DecodeJSON(resp.Body, out)
 	if err != nil {
 		return nil, transport.SerializationError(family+".query", family, resp.EffectiveURL, resp.Body, err)

@@ -1,13 +1,20 @@
-# fastnear-go
+# FastNear Golang Client/SDK/Library
+
+![FastNear API Client/SDK/Library](https://i.postimg.cc/TYHn1gSX/fastnear-go-banner-api.jpg)
 
 A Go client for [FastNear](https://docs.fastnear.com/) and NEAR Protocol.
 Read balances, call contracts, walk transaction history, inspect blocks, or submit
 a transaction you have already signed. Six API families share one client, while
 each service keeps its own methods and response types.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/tigusigalpa/fastnear-go.svg)](https://pkg.go.dev/github.com/tigusigalpa/fastnear-go)
 [![CI](https://github.com/tigusigalpa/fastnear-go/actions/workflows/ci.yml/badge.svg)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Tests](https://github.com/tigusigalpa/fastnear-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tigusigalpa/marketaux-go.svg)](https://pkg.go.dev/github.com/tigusigalpa/marketaux-go)
+[![CodeQL](https://github.com/tigusigalpa/fastnear-go/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/codeql.yml)
+[![Codecov](https://codecov.io/gh/tigusigalpa/fastnear-go/graph/badge.svg)](https://codecov.io/gh/tigusigalpa/fastnear-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg)](go.mod)
+[![GitHub Release](https://img.shields.io/github/v/release/tigusigalpa/fastnear-go?style=flat-square)](https://github.com/tigusigalpa/fastnear-go/releases)
 
 Requires **Go 1.23+**. Uses only the standard library, with context cancellation,
 bounded retries, exact balance formatting, page iterators and `iter.Seq2` streams.

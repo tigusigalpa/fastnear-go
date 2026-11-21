@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed `transfers.TransfersPage` to `transfers.Page` to avoid repeating the
+  package name. Update explicit type references; `Client.Query` returns `*Page`.
 - Expanded the README with complete startup, error handling, pagination,
   configuration and transaction examples, plus practical scope limitations.
 - Unit HTTP fixtures now use in-memory connections rather than TCP sockets.

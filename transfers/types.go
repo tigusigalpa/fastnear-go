@@ -129,18 +129,18 @@ const (
 	AssetTypeFT     = "ft"
 )
 
-// TransfersPage is one /v0/transfers page.
-type TransfersPage struct { //nolint:revive // Preserve the existing public type name.
+// Page is one /v0/transfers page.
+type Page struct {
 	jsonx.RawCarrier
 	Transfers   []TransferRow `json:"transfers"`
 	ResumeToken string        `json:"resume_token"`
 }
 
 // HasMore reports whether a next page exists.
-func (p *TransfersPage) HasMore() bool { return p != nil && p.ResumeToken != "" }
+func (p *Page) HasMore() bool { return p != nil && p.ResumeToken != "" }
 
 // Items returns the page rows.
-func (p *TransfersPage) Items() []TransferRow { return p.Transfers }
+func (p *Page) Items() []TransferRow { return p.Transfers }
 
 // NextToken returns the continuation token ("" = end).
-func (p *TransfersPage) NextToken() string { return p.ResumeToken }
+func (p *Page) NextToken() string { return p.ResumeToken }
