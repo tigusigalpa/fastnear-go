@@ -165,16 +165,12 @@ func (c *Client) KV() *kv.Client {
 }
 
 // Close releases idle HTTP connections. Repeated calls are safe.
-// Close releases idle HTTP connections. Repeated calls are safe.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, t := range c.transports {
-		t.CloseIdleConnections()
-	}
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()
 	}
@@ -199,6 +195,9 @@ func (c *Client) transportFor(f Family) (*transport.Client, error) {
 	}
 	if c.httpClient == nil {
 		c.httpClient = c.cfg.httpClient
+		if c.httpClient == nil {
+			c.httpClient = transport.NewHTTPClient(c.cfg.connectTimeout)
+		}
 	}
 	// NEAR Data redirects to sibling mirror hosts (a0.<host>, …);
 	// allow cross-host redirects within the configured host's domain.
@@ -209,12 +208,13 @@ func (c *Client) transportFor(f Family) (*transport.Client, error) {
 		}
 	}
 	t := transport.New(transport.Params{
-		HTTPClient: c.httpClient,
-		BaseURL:    baseURL,
-		APIKey:     c.cfg.apiKey,
-		AuthMode:   transport.AuthMode(c.cfg.authMode),
-		Family:     string(f),
-		Timeout:    c.cfg.timeout,
+		HTTPClient:     c.httpClient,
+		BaseURL:        baseURL,
+		APIKey:         c.cfg.apiKey,
+		AuthMode:       transport.AuthMode(c.cfg.authMode),
+		Family:         string(f),
+		Timeout:        c.cfg.timeout,
+		ConnectTimeout: c.cfg.connectTimeout,
 		Retry: transport.RetryPolicy{
 			MaxRetries:         c.cfg.maxRetries,
 			BaseDelay:          c.cfg.retryBaseDelay,

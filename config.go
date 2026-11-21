@@ -1,10 +1,19 @@
 package fastnear
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 )
+
+// String returns a diagnostic summary with the API key masked.
+func (c Config) String() string {
+	return fmt.Sprintf("fastnear.Config{Network:%s AuthMode:%s APIKey:%s Archival:%t Timeout:%s MaxRetries:%d}", c.network, c.authMode, c.MaskedAPIKey(), c.archival, c.timeout, c.maxRetries)
+}
+
+// GoString keeps credentials masked in %#v output too.
+func (c Config) GoString() string { return c.String() }
 
 // Config is the immutable client configuration produced by Options.
 // Obtain it through Client.Config(); construct it through NewClient

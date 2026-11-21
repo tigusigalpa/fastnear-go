@@ -55,6 +55,9 @@ func IsRetryable(err error) bool {
 	if e.Code == "quota_exceeded" || e.Code == "validation_error" || e.Code == "configuration_error" {
 		return false
 	}
+	if e.StatusCode == 402 {
+		return false
+	}
 	if e.RPC != nil {
 		switch e.RPC.Code {
 		case -32601, -32602: // method not found / invalid params
@@ -68,7 +71,7 @@ func IsRetryable(err error) bool {
 	case 408, 425, 429, 500, 502, 503, 504:
 		return true
 	case 0:
-		return e.Err != nil && !errors.Is(e.Err, context.Canceled)
+		return (e.Code == "transport_error" || e.Code == "timeout") && e.Err != nil
 	}
-	return false
+	return e.StatusCode >= 500 && e.StatusCode <= 599
 }

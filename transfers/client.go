@@ -29,18 +29,16 @@ func NewClient(t *transport.Client, err error) *Client {
 	return &Client{t: t, err: err}
 }
 
-type dtoPtr[T any] interface {
-	*T
-	SetRaw(json.RawMessage)
-}
-
 func (c *Client) guard(op string) error {
 	op = family + "." + op
-	if c == nil || c.t == nil {
+	if c == nil {
 		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	if c.err != nil {
 		return &fastnearerr.Error{Op: op, Family: family, Code: "configuration_error", Message: c.err.Error(), Err: c.err}
+	}
+	if c.t == nil {
+		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	return nil
 }

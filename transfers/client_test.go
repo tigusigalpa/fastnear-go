@@ -3,37 +3,37 @@ package transfers
 import (
 	"context"
 	"encoding/json"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	tr := transport.New(transport.Params{
-		BaseURL: srv.URL, APIKey: "k", Family: family,
+		HTTPClient: srv.Client(), BaseURL: srv.URL, APIKey: "k", Family: family,
 		Timeout:  5 * time.Second,
 		Retry:    transport.RetryPolicy{MaxRetries: 0},
 		MaxBytes: 1 << 20,
 	})
-	return NewClient(tr, nil), srv
+	return NewClient(tr, nil)
 }
 
 // TestQuery verifies the POST body and page decoding.
 func TestQuery(t *testing.T) {
 	var got map[string]any
 	var gotMethod, gotPath string
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &got)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.Unmarshal(b, &got)
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"transfers": []map[string]any{{
 				"account_id": "a.near", "other_account_id": "b.near",
 				"asset_id": "native:near", "asset_type": "native",
@@ -44,11 +44,11 @@ func TestQuery(t *testing.T) {
 			"resume_token": "tok",
 		})
 	})
-	asset, desc, min := "native:near", true, "1000"
+	asset, desc, minAmount := "native:near", true, "1000"
 	lim := uint32(10)
 	p, err := c.Query(context.Background(), Query{
 		AccountID: "a.near", Direction: DirectionReceiver,
-		AssetID: &asset, Desc: &desc, MinAmount: &min, Limit: &lim,
+		AssetID: &asset, Desc: &desc, MinAmount: &minAmount, Limit: &lim,
 	})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -75,7 +75,7 @@ func TestQuery(t *testing.T) {
 
 // TestQueryValidation rejects bad input before any request.
 func TestQueryValidation(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("no request expected")
 	})
 	if _, err := c.Query(context.Background(), Query{Direction: DirectionSender}); err == nil {
@@ -96,16 +96,16 @@ func TestQueryValidation(t *testing.T) {
 // TestIterator walks pages until an empty resume_token.
 func TestIterator(t *testing.T) {
 	calls := 0
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &body)
+		_ = json.Unmarshal(b, &body)
 		next := "t" + string(rune('a'+calls))
 		if calls == 2 {
 			next = ""
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"transfers":    []map[string]any{{"transaction_id": "H"}},
 			"resume_token": next,
 		})

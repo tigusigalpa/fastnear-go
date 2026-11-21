@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -142,6 +143,9 @@ func (r *CallResult) UnmarshalJSON(data []byte) error {
 	}
 	r.Result = make([]byte, len(raw.Result))
 	for i, v := range raw.Result {
+		if v > 255 {
+			return fmt.Errorf("fastnear: result byte at index %d exceeds 255", i)
+		}
 		r.Result[i] = byte(v)
 	}
 	r.Logs = raw.Logs
@@ -168,8 +172,8 @@ type StateItem struct {
 	Value []byte
 }
 
-// stateItemWire is the base64 wire form of StateItem.
-type stateItemWire struct {
+// StateItemWire is the base64 wire form of StateItem.
+type StateItemWire struct {
 	Key   string          `json:"key"`
 	Value string          `json:"value"`
 	Proof json.RawMessage `json:"proof"`
@@ -179,7 +183,7 @@ type stateItemWire struct {
 // See https://docs.fastnear.com/rpc/contract/view-state
 type ViewStateResult struct {
 	jsonx.RawCarrier
-	values      []stateItemWire
+	values      []StateItemWire
 	Proof       []json.RawMessage `json:"proof"`
 	LastKey     *string           `json:"last_key"`
 	BlockHeight uint64            `json:"block_height"`
@@ -190,7 +194,7 @@ type ViewStateResult struct {
 // decodes them lazily.
 func (r *ViewStateResult) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Values      []stateItemWire   `json:"values"`
+		Values      []StateItemWire   `json:"values"`
 		Proof       []json.RawMessage `json:"proof"`
 		LastKey     *string           `json:"last_key"`
 		BlockHeight uint64            `json:"block_height"`
@@ -208,7 +212,7 @@ func (r *ViewStateResult) UnmarshalJSON(data []byte) error {
 }
 
 // Values returns the raw (base64) wire items for advanced use.
-func (r *ViewStateResult) Values() []stateItemWire { return r.values }
+func (r *ViewStateResult) Values() []StateItemWire { return r.values }
 
 // Entries decodes all key/value pairs from base64.
 func (r *ViewStateResult) Entries() ([]StateItem, error) {
@@ -342,7 +346,11 @@ type StateChanges struct {
 
 // MaintenanceWindow is one maintenance slot range.
 type MaintenanceWindow struct {
-	Height    uint64 `json:"height"`
+	Start uint64 `json:"start"`
+	End   uint64 `json:"end"`
+	// Deprecated: upstream windows use Start and End.
+	Height uint64 `json:"height"`
+	// Deprecated: the account ID belongs to the request, not each range.
 	AccountID string `json:"account_id"`
 }
 
@@ -352,6 +360,20 @@ type MaintenanceWindows struct {
 	jsonx.RawCarrier
 	AccountID string              `json:"account_id"`
 	Ranges    []MaintenanceWindow `json:"ranges"`
+}
+
+// UnmarshalJSON decodes the upstream array into the Ranges collection.
+func (m *MaintenanceWindows) UnmarshalJSON(data []byte) error {
+	if b := bytes.TrimSpace(data); len(b) > 0 && b[0] == '[' {
+		var ranges []MaintenanceWindow
+		if err := json.Unmarshal(data, &ranges); err != nil {
+			return err
+		}
+		*m = MaintenanceWindows{Ranges: ranges}
+		return nil
+	}
+	type plain MaintenanceWindows
+	return json.Unmarshal(data, (*plain)(m))
 }
 
 // LightClientProof is a light client inclusion proof.
@@ -413,6 +435,31 @@ type ExecutionStatus struct {
 	SuccessReceiptID *string         `json:"SuccessReceiptId"`
 	Failure          json.RawMessage `json:"Failure"`
 	Unknown          *bool           `json:"Unknown"`
+	// Pending is a unit status such as "NotStarted" or "Started".
+	Pending string `json:"-"`
+}
+
+// UnmarshalJSON accepts both the object and unit-string forms of NEAR status.
+func (s *ExecutionStatus) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var state string
+		if err := json.Unmarshal(data, &state); err != nil {
+			return err
+		}
+		*s = ExecutionStatus{Pending: state}
+		if state == "Unknown" {
+			b := true
+			s.Unknown = &b
+		}
+		return nil
+	}
+	type plain ExecutionStatus
+	var parsed plain
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*s = ExecutionStatus(parsed)
+	return nil
 }
 
 // IsSuccess reports whether the execution succeeded.
@@ -432,6 +479,35 @@ type ExecutionOutcomeView struct {
 	GasBurnt    uint64          `json:"gas_burnt"`
 	ExecutorID  string          `json:"executor_id"`
 	Metadata    json.RawMessage `json:"metadata"`
+	// Outcome contains the node's nested outcome object. The fields above
+	// also expose its values for compatibility with existing callers.
+	Outcome *ExecutionOutcome `json:"outcome"`
+}
+
+// ExecutionOutcome contains execution details inside a proof-bearing outcome.
+type ExecutionOutcome struct {
+	Logs        []string        `json:"logs"`
+	ReceiptIDs  []string        `json:"receipt_ids"`
+	Status      ExecutionStatus `json:"status"`
+	TokensBurnt string          `json:"tokens_burnt"`
+	GasBurnt    uint64          `json:"gas_burnt"`
+	ExecutorID  string          `json:"executor_id"`
+	Metadata    json.RawMessage `json:"metadata"`
+}
+
+// UnmarshalJSON decodes the nested outcome and populates its convenience fields.
+func (o *ExecutionOutcomeView) UnmarshalJSON(data []byte) error {
+	type plain ExecutionOutcomeView
+	var parsed plain
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*o = ExecutionOutcomeView(parsed)
+	if o.Outcome != nil {
+		o.Logs, o.ReceiptIDs, o.Status = o.Outcome.Logs, o.Outcome.ReceiptIDs, o.Outcome.Status
+		o.TokensBurnt, o.GasBurnt, o.ExecutorID, o.Metadata = o.Outcome.TokensBurnt, o.Outcome.GasBurnt, o.Outcome.ExecutorID, o.Outcome.Metadata
+	}
+	return nil
 }
 
 // FinalExecutionOutcome is the outcome of send_tx/tx/tx_status.
@@ -439,18 +515,20 @@ type ExecutionOutcomeView struct {
 type FinalExecutionOutcome struct {
 	jsonx.RawCarrier
 	FinalExecutionStatus string                 `json:"final_execution_status"`
+	FinalStatus          *ExecutionStatus       `json:"status"`
 	ExecutionOutcome     *ExecutionOutcomeView  `json:"execution_outcome"`
 	ReceiptsOutcome      []ExecutionOutcomeView `json:"receipts_outcome"`
 	Transaction          json.RawMessage        `json:"transaction"`
 	TransactionOutcome   *ExecutionOutcomeView  `json:"transaction_outcome"`
 }
 
-// Status returns the transaction outcome status.
+// Status returns the aggregate status, including receipt failures. It is nil
+// when the node has not returned an aggregate execution status yet.
 func (o *FinalExecutionOutcome) Status() *ExecutionStatus {
-	if o == nil || o.TransactionOutcome == nil {
+	if o == nil {
 		return nil
 	}
-	return &o.TransactionOutcome.Status
+	return o.FinalStatus
 }
 
 // Receipt is the EXPERIMENTAL_receipt result.
@@ -488,11 +566,25 @@ type ValidatorSet struct {
 	NextValidators    []ValidatorInfo   `json:"next_validators"`
 	EpochStartHeight  uint64            `json:"epoch_start_height"`
 	EpochHeight       uint64            `json:"epoch_height"`
-	Proposals         []json.RawMessage `json:"proposals"`
+	Proposals         []json.RawMessage `json:"current_proposals"`
 }
 
 // ValidatorsOrdered is the EXPERIMENTAL_validators_ordered result.
 type ValidatorsOrdered struct {
 	jsonx.RawCarrier
 	Validators []ValidatorInfo `json:"validators"`
+}
+
+// UnmarshalJSON decodes the upstream array into the Validators collection.
+func (v *ValidatorsOrdered) UnmarshalJSON(data []byte) error {
+	if b := bytes.TrimSpace(data); len(b) > 0 && b[0] == '[' {
+		var validators []ValidatorInfo
+		if err := json.Unmarshal(data, &validators); err != nil {
+			return err
+		}
+		*v = ValidatorsOrdered{Validators: validators}
+		return nil
+	}
+	type plain ValidatorsOrdered
+	return json.Unmarshal(data, (*plain)(v))
 }

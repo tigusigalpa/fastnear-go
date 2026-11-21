@@ -2,25 +2,25 @@ package data
 
 import (
 	"context"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	tr := transport.New(transport.Params{
-		BaseURL: srv.URL, APIKey: "k", Family: family,
+		HTTPClient: srv.Client(), BaseURL: srv.URL, APIKey: "k", Family: family,
 		Timeout:  5 * time.Second,
 		Retry:    transport.RetryPolicy{MaxRetries: 0},
 		MaxBytes: 8 << 20,
 	})
-	return NewClient(tr, nil), srv
+	return NewClient(tr, nil)
 }
 
 const blockDoc = `{"block":{"author":"v.near","header":{"height":100,"hash":"BH","prev_hash":"PH","timestamp":1700000000000,"timestamp_nanosec":"1700000000000000000","gas_price":"100000000","total_supply":"1","chunks_included":1},"chunks":[{"chunk_hash":"CH","shard_id":0,"height_created":100,"height_included":100,"gas_used":0,"gas_limit":1,"outcome_root":"o","outgoing_receipts_root":"r","tx_root":"t"}]},"shards":[{"shard_id":0,"chunk":{"author":"v.near","header":{"chunk_hash":"CH"},"transactions":[],"receipts":[]},"receipt_execution_outcomes":[],"state_changes":[]}]}`
@@ -45,9 +45,9 @@ func TestPaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotPath string
-			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 				gotPath = r.URL.Path
-				w.Write([]byte(`{"status":"ok","block":` + `{"header":{"height":100}}` + `,"header":{"height":100},"shard_id":0}`))
+				_, _ = w.Write([]byte(`{"status":"ok","block":` + `{"header":{"height":100}}` + `,"header":{"height":100},"shard_id":0}`))
 			})
 			if err := tc.call(c); err != nil {
 				t.Fatalf("call: %v", err)
@@ -61,8 +61,8 @@ func TestPaths(t *testing.T) {
 
 // TestBlockDecode decodes a full block document.
 func TestBlockDecode(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(blockDoc))
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(blockDoc))
 	})
 	doc, err := c.Block(context.Background(), 100)
 	if err != nil {
@@ -90,10 +90,10 @@ func TestLastOptimisticRedirect(t *testing.T) {
 	mux.HandleFunc("/v0/last_block/optimistic", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/v0/block_opt/555", http.StatusFound)
 	})
-	mux.HandleFunc("/v0/block_opt/555", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"block":{"header":{"height":555,"timestamp":1}},"shards":[]}`))
+	mux.HandleFunc("/v0/block_opt/555", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"block":{"header":{"height":555,"timestamp":1}},"shards":[]}`))
 	})
-	c, _ := newTestClient(t, mux.ServeHTTP)
+	c := newTestClient(t, mux.ServeHTTP)
 	doc, err := c.LastBlockOptimistic(context.Background())
 	if err != nil {
 		t.Fatalf("call: %v", err)
@@ -106,7 +106,7 @@ func TestLastOptimisticRedirect(t *testing.T) {
 // TestHeightFromLocation: LastOptimisticHeight parses the redirect
 // Location instead of downloading the block.
 func TestHeightFromLocation(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v0/last_block/optimistic" {
 			w.Header().Set("Location", "/v0/block_opt/777")
 			w.WriteHeader(http.StatusFound)
@@ -139,16 +139,15 @@ func TestHeightFromLocation(t *testing.T) {
 // TestCrossHostRedirect: mirror hosts under the base domain are
 // followed when the suffix is allowed; other hosts are refused.
 func TestCrossHostRedirect(t *testing.T) {
-	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"block":{"header":{"height":9820210}},"shards":[]}`))
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"block":{"header":{"height":9820210}},"shards":[]}`))
 	}))
 	defer mirror.Close()
 
-	var handler http.HandlerFunc
-	handler = func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, mirror.URL+"/v0/block/9820210", http.StatusFound)
 	}
-	c, _ := newTestClient(t, handler)
+	c := newTestClient(t, handler)
 	// No allowed suffixes → refused (mirror is a different host).
 	if _, err := c.FirstBlock(context.Background()); err == nil {
 		t.Fatal("want redirect refusal")

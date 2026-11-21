@@ -130,7 +130,7 @@ const (
 )
 
 // TransfersPage is one /v0/transfers page.
-type TransfersPage struct {
+type TransfersPage struct { //nolint:revive // Preserve the existing public type name.
 	jsonx.RawCarrier
 	Transfers   []TransferRow `json:"transfers"`
 	ResumeToken string        `json:"resume_token"`

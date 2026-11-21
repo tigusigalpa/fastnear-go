@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tigusigalpa/fastnear-go/fastnearerr"
-	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
 )
 
 // apiErrorBody is the REST error envelope used by FastNear API,
@@ -23,7 +23,7 @@ type apiErrorBody struct {
 // A JSON literal null is a valid "not found / out of range" answer:
 // it returns (false, nil) so callers can return nil without an error.
 func DecodeJSON(body []byte, out any) (bool, error) {
-	if jsonx.IsNull(body) {
+	if bytes.Equal(bytes.TrimSpace(body), []byte("null")) {
 		return false, nil
 	}
 	if err := json.Unmarshal(body, out); err != nil {
@@ -41,11 +41,12 @@ func ErrorFromResponse(op, family, requestURL string, resp *http.Response, body 
 		Family:     family,
 		StatusCode: resp.StatusCode,
 		RequestURL: requestURL,
-		RawBody:    body,
 	}
-	if len(e.RawBody) > 8<<10 {
-		e.RawBody = e.RawBody[:8<<10]
+	diagnostic := body
+	if len(diagnostic) > 8<<10 {
+		diagnostic = diagnostic[:8<<10]
 	}
+	e.RawBody = bytes.Clone(diagnostic)
 	var parsed apiErrorBody
 	if err := json.Unmarshal(body, &parsed); err == nil {
 		e.Code = parsed.Error
@@ -88,13 +89,16 @@ func ErrorFromTransport(op, family, requestURL string, err error) *fastnearerr.E
 // SerializationError builds an *Error for invalid JSON or a schema
 // mismatch in an otherwise successful response.
 func SerializationError(op, family, requestURL string, body []byte, err error) *fastnearerr.Error {
+	if len(body) > 8<<10 {
+		body = body[:8<<10]
+	}
 	return &fastnearerr.Error{
 		Op:         op,
 		Family:     family,
 		Code:       "serialization_error",
 		Message:    "failed to decode response",
 		RequestURL: requestURL,
-		RawBody:    body,
+		RawBody:    bytes.Clone(body),
 		Err:        err,
 	}
 }
@@ -139,6 +143,10 @@ func parseRetryAfter(h string) (time.Duration, bool) {
 	if secs, err := strconv.Atoi(h); err == nil {
 		if secs < 0 {
 			secs = 0
+		}
+		const maxSeconds = int64((1<<63 - 1) / int64(time.Second))
+		if int64(secs) > maxSeconds {
+			return time.Duration(1<<63 - 1), true
 		}
 		return time.Duration(secs) * time.Second, true
 	}

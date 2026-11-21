@@ -149,7 +149,13 @@ func (s *Service) ViewCallJSON(ctx context.Context, contractID, method string, a
 func (s *Service) StateEntries(ctx context.Context, accountID, prefixBase64 string, limit *uint32) iter.Seq2[rpc.StateItem, error] {
 	return func(yield func(rpc.StateItem, error) bool) {
 		var after *string
+		seen := make(map[string]bool)
+		pages := 0
 		for {
+			if pages >= 100 {
+				yield(rpc.StateItem{}, &fastnearerr.Error{Op: "recipes.state_entries", Family: "rpc", Code: "pagination_limit", Message: "max pages limit reached"})
+				return
+			}
 			page, err := s.c.RPC().ViewState(ctx, rpc.ViewStateRequest{
 				AccountID:      accountID,
 				PrefixBase64:   prefixBase64,
@@ -164,10 +170,18 @@ func (s *Service) StateEntries(ctx context.Context, accountID, prefixBase64 stri
 			if page == nil {
 				return
 			}
+			pages++
+			if page.LastKey != nil && seen[*page.LastKey] {
+				yield(rpc.StateItem{}, &fastnearerr.Error{Op: "recipes.state_entries", Family: "rpc", Code: "pagination_loop", Message: "server returned a repeated last_key"})
+				return
+			}
+			if page.LastKey != nil {
+				seen[*page.LastKey] = true
+			}
 			items, err := page.Entries()
 			if err != nil {
 				var zero rpc.StateItem
-				yield(zero, err)
+				yield(zero, &fastnearerr.Error{Op: "recipes.state_entries", Family: "rpc", Code: "serialization_error", Message: "cannot decode state entries", Err: err})
 				return
 			}
 			for _, it := range items {

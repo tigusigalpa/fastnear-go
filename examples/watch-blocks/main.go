@@ -46,8 +46,8 @@ func main() {
 			continue
 		}
 		for last < h {
-			last++
-			env, err := svc.BlockHeaders(ctx, last)
+			next := last + 1
+			env, err := svc.BlockHeaders(ctx, next)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "headers:", err)
 				break
@@ -56,6 +56,7 @@ func main() {
 				fmt.Printf("block %d by %s (%d chunks)\n",
 					env.Header.Height, env.Author, len(env.Chunks))
 			}
+			last = next
 		}
 	}
 }

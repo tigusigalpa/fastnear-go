@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,16 +38,17 @@ type Middleware = func(req *http.Request, resp *http.Response, elapsed time.Dura
 
 // Params configures a Client bound to a single API family base URL.
 type Params struct {
-	HTTPClient *http.Client
-	BaseURL    string
-	APIKey     string
-	AuthMode   AuthMode
-	Family     string
-	Timeout    time.Duration
-	Retry      RetryPolicy
-	Logger     *slog.Logger
-	UserAgent  string
-	MaxBytes   int64
+	HTTPClient     *http.Client
+	BaseURL        string
+	APIKey         string
+	AuthMode       AuthMode
+	Family         string
+	Timeout        time.Duration
+	ConnectTimeout time.Duration
+	Retry          RetryPolicy
+	Logger         *slog.Logger
+	UserAgent      string
+	MaxBytes       int64
 	// ConfigErr, when non-nil, is returned (wrapped) by every Do call.
 	// It lets family clients surface configuration problems lazily.
 	ConfigErr error
@@ -73,7 +75,6 @@ type Client struct {
 	maxBytes   int64
 	configErr  error
 	middleware []Middleware
-	ownsClient bool
 	redirHosts []string
 }
 
@@ -108,26 +109,56 @@ func New(p Params) *Client {
 	if c.authMode == "" {
 		c.authMode = AuthBearer
 	}
+	if c.retry.BaseDelay <= 0 {
+		c.retry.BaseDelay = 200 * time.Millisecond
+	}
+	if c.retry.MaxDelay <= 0 {
+		c.retry.MaxDelay = 5 * time.Second
+	}
+	if c.retry.Budget <= 0 {
+		c.retry.Budget = 15 * time.Second
+	}
 	if p.HTTPClient != nil {
-		c.hc = p.HTTPClient
+		copyClient := *p.HTTPClient
+		customRedirect := copyClient.CheckRedirect
+		copyClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if err := c.checkRedirect(req, via); err != nil {
+				return err
+			}
+			if customRedirect != nil {
+				return customRedirect(req, via)
+			}
+			return nil
+		}
+		c.hc = &copyClient
 	} else {
-		c.ownsClient = true
 		c.hc = &http.Client{
-			Transport:     defaultHTTPTransport(),
+			Transport:     defaultHTTPTransport(p.ConnectTimeout),
 			CheckRedirect: c.checkRedirect,
 		}
 	}
 	return c
 }
 
-func defaultHTTPTransport() *http.Transport {
+func defaultHTTPTransport(connectTimeout time.Duration) *http.Transport {
+	if connectTimeout <= 0 {
+		connectTimeout = 5 * time.Second
+	}
 	return &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext:         (&net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}).DialContext,
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 5 * time.Second,
+		TLSHandshakeTimeout: connectTimeout,
 		ForceAttemptHTTP2:   true,
 	}
+}
+
+// NewHTTPClient builds the shared connection pool used by the root client.
+// Each family copies the client and installs its own redirect checks.
+func NewHTTPClient(connectTimeout time.Duration) *http.Client {
+	return &http.Client{Transport: defaultHTTPTransport(connectTimeout)}
 }
 
 // CloseIdleConnections releases keep-alive connections. Safe to call
@@ -165,14 +196,18 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 	}
 	scrubbedURL := scrubKey(fullURL)
 
-	maxAttempts := 1 + c.retry.MaxRetries
+	maxRetries := c.retry.MaxRetries
 	if r.NoRetry && !c.retry.RetryNonIdempotent {
-		maxAttempts = 1
+		maxRetries = 0
 	}
 	budgetStart := time.Now()
 
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	rpcRetries := 0
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, err)
+		}
 		if attempt > 0 {
 			wait := c.retry.backoff(attempt - 1)
 			if re, ok := fastnearerr.As(lastErr); ok && re.RetryAfter > 0 {
@@ -189,16 +224,40 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 			}
 		}
 
-		resp, err := c.doOnce(ctx, r, fullURL, scrubbedURL)
+		attemptCtx := ctx
+		cancel := func() {}
+		if attempt > 0 {
+			remaining := c.retry.Budget - time.Since(budgetStart)
+			if remaining <= 0 {
+				return nil, lastErr
+			}
+			attemptCtx, cancel = context.WithTimeout(ctx, remaining)
+		}
+		resp, err := c.doOnce(attemptCtx, r, fullURL, scrubbedURL)
+		cancel()
+		if err == nil && r.CheckResponse != nil {
+			err = r.CheckResponse(resp)
+		}
 		if err == nil {
 			return resp, nil
 		}
+		if e, ok := fastnearerr.As(err); ok {
+			err = c.RedactError(e)
+		}
 		lastErr = err
+		if attempt >= maxRetries {
+			return nil, err
+		}
+		if e, ok := fastnearerr.As(err); ok && e.RPC != nil {
+			if rpcRetries >= 1 {
+				return nil, err
+			}
+			rpcRetries++
+		}
 		if !fastnearerr.IsRetryable(err) {
 			return nil, err
 		}
 	}
-	return nil, lastErr
 }
 
 // doOnce performs a single attempt including timeout and body limits.
@@ -215,7 +274,7 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 
 	hreq, err := http.NewRequestWithContext(reqCtx, r.Method, fullURL, bytes.NewReader(r.Body))
 	if err != nil {
-		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, err)
+		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, c.sanitizeError(err))
 	}
 	hreq.Header.Set("Accept", "application/json")
 	if r.Body != nil {
@@ -235,11 +294,11 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 	for _, mw := range c.middleware {
 		mw(hreq, resp, elapsed)
 	}
-	c.log(r, resp, elapsed, err)
+	c.log(ctx, r, resp, elapsed, err)
 	if err != nil {
-		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, err)
+		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, c.sanitizeError(err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := c.readBody(resp)
 	if err != nil {
@@ -250,7 +309,7 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 			e.RequestURL = scrubbedURL
 			return nil, e
 		}
-		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, err)
+		return nil, ErrorFromTransport(r.Op, c.family, scrubbedURL, c.sanitizeError(err))
 	}
 
 	// Deliberately unfollowed redirect is a successful response.
@@ -258,11 +317,9 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 		return &Response{StatusCode: resp.StatusCode, Header: resp.Header, Body: body, EffectiveURL: scrubKey(resp.Request.URL.String())}, nil
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return nil, &fastnearerr.Error{
-			Op: r.Op, Family: c.family, StatusCode: resp.StatusCode,
-			Code: "redirect_refused", Message: "redirect to a different host refused",
-			RequestURL: scrubbedURL, RawBody: body,
-		}
+		e := fastnearerr.New(r.Op, c.family, resp.StatusCode, "redirect_refused", "redirect refused by client policy", body, nil)
+		e.RequestURL = scrubbedURL
+		return nil, e
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, ErrorFromResponse(r.Op, c.family, scrubbedURL, resp, body)
@@ -272,14 +329,20 @@ func (c *Client) doOnce(ctx context.Context, r Request, fullURL, scrubbedURL str
 
 // readBody enforces the configured response-size cap.
 func (c *Client) readBody(resp *http.Response) ([]byte, error) {
-	lr := io.LimitReader(resp.Body, c.maxBytes+1)
+	lr := io.LimitReader(resp.Body, c.maxBytes)
 	body, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(body)) > c.maxBytes {
+	// Probe separately to avoid overflow when maxBytes == math.MaxInt64.
+	var extra [1]byte
+	n, err := io.ReadFull(resp.Body, extra[:])
+	if n > 0 {
 		return nil, &fastnearerr.Error{Code: "response_too_large",
 			Message: fmt.Sprintf("response body exceeds the configured limit of %d bytes", c.maxBytes)}
+	}
+	if err != nil && err != io.EOF {
+		return nil, err
 	}
 	return body, nil
 }
@@ -319,18 +382,27 @@ func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 5 {
 		return errors.New("fastnear: too many redirects")
 	}
-	prev := via[len(via)-1]
-	if !strings.EqualFold(req.URL.Host, prev.URL.Host) && !c.redirectHostAllowed(req.URL.Hostname()) {
+	original := via[0]
+	if req.URL.User != nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") ||
+		(original.URL.Scheme == "https" && req.URL.Scheme != "https") {
 		return http.ErrUseLastResponse
+	}
+	if !strings.EqualFold(req.URL.Host, original.URL.Host) &&
+		(!c.redirectHostAllowed(req.URL.Hostname()) || req.URL.Port() != original.URL.Port()) {
+		return http.ErrUseLastResponse
+	}
+	// Restore header auth for trusted mirrors; net/http drops it on some
+	// cross-host redirects. Evaluate every hop against the original host.
+	if c.authMode == AuthBearer && c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 	// Re-attach apiKey on redirect when query auth is in use; the
 	// Location header never carries it.
 	if c.authMode == AuthQuery && c.apiKey != "" {
 		q := req.URL.Query()
-		if q.Get("apiKey") == "" {
-			q.Set("apiKey", c.apiKey)
-			req.URL.RawQuery = q.Encode()
-		}
+		q.Set("apiKey", c.apiKey)
+		req.URL.RawQuery = q.Encode()
+		req.Header.Del("Referer")
 	}
 	return nil
 }
@@ -349,7 +421,7 @@ func (c *Client) redirectHostAllowed(host string) bool {
 }
 
 // log emits one slog record per attempt without secrets.
-func (c *Client) log(r Request, resp *http.Response, elapsed time.Duration, err error) {
+func (c *Client) log(ctx context.Context, r Request, resp *http.Response, elapsed time.Duration, err error) {
 	if c.logger == nil {
 		return
 	}
@@ -368,20 +440,17 @@ func (c *Client) log(r Request, resp *http.Response, elapsed time.Duration, err 
 		"bytes", size,
 	}
 	if err != nil {
-		attrs = append(attrs, "error", err.Error())
+		attrs = append(attrs, "error", c.sanitizeError(err).Error())
 	}
 	if err != nil || status >= 400 {
-		c.logger.Log(context.Background(), slog.LevelWarn, "fastnear request failed", attrs...)
+		c.logger.Log(ctx, slog.LevelWarn, "fastnear request failed", attrs...)
 	} else {
-		c.logger.Debug("fastnear request", attrs...)
+		c.logger.DebugContext(ctx, "fastnear request", attrs...)
 	}
 }
 
 // scrubKey removes the apiKey query parameter from a URL string.
 func scrubKey(raw string) string {
-	if !strings.Contains(raw, "apiKey=") {
-		return raw
-	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "fastnear://invalid-url"
@@ -389,7 +458,66 @@ func scrubKey(raw string) string {
 	q := u.Query()
 	q.Del("apiKey")
 	u.RawQuery = q.Encode()
+	u.User = nil
 	return u.String()
+}
+
+// sanitizeError preserves error inspection while scrubbing URL-bearing errors
+// and messages supplied by custom transports.
+func (c *Client) sanitizeError(err error) error {
+	if e, ok := err.(*url.Error); ok {
+		copyError := *e
+		copyError.URL = scrubKey(e.URL)
+		copyError.Err = c.sanitizeError(e.Err)
+		return &copyError
+	}
+	if err != nil {
+		if msg := c.redact(err.Error()); msg != err.Error() {
+			return &redactedError{err: err, message: msg}
+		}
+	}
+	return err
+}
+
+// RedactError scrubs a protocol error constructed after an HTTP response,
+// including per-call batch errors. It does not mutate the supplied error.
+func (c *Client) RedactError(e *fastnearerr.Error) *fastnearerr.Error {
+	if e == nil {
+		return nil
+	}
+	copyError := *e
+	copyError.Code, copyError.Message = c.redact(e.Code), c.redact(e.Message)
+	copyError.RawBody = []byte(c.redact(string(e.RawBody)))
+	if len(copyError.RawBody) > 8<<10 {
+		copyError.RawBody = copyError.RawBody[:8<<10]
+	}
+	copyError.Err = c.sanitizeError(e.Err)
+	if e.RPC != nil {
+		copyRPC := *e.RPC
+		copyRPC.Message = c.redact(e.RPC.Message)
+		copyRPC.Name = c.redact(e.RPC.Name)
+		copyRPC.Data = []byte(c.redact(string(e.RPC.Data)))
+		copyError.RPC = &copyRPC
+	}
+	return &copyError
+}
+
+type redactedError struct {
+	err     error
+	message string
+}
+
+func (e *redactedError) Error() string { return e.message }
+func (e *redactedError) Unwrap() error { return e.err }
+
+func (c *Client) redact(s string) string {
+	if c.apiKey == "" {
+		return s
+	}
+	for _, key := range []string{url.QueryEscape(c.apiKey), url.PathEscape(c.apiKey), c.apiKey} {
+		s = strings.ReplaceAll(s, key, "[REDACTED]")
+	}
+	return s
 }
 
 func rOpFamily(r Request) string {

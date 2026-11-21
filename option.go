@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Option configures NewClient. Options are applied in order and each
@@ -19,8 +20,8 @@ type Option func(*Config) error
 // Authorization header (some endpoints answer anonymously).
 func WithAPIKey(key string) Option {
 	return func(c *Config) error {
-		if strings.ContainsAny(key, " \t\r\n") {
-			return errors.New("fastnear: api key must not contain whitespace")
+		if strings.ContainsFunc(key, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+			return errors.New("fastnear: api key must not contain whitespace or control characters")
 		}
 		c.apiKey = key
 		return nil
@@ -121,9 +122,9 @@ func WithMaxResponseBytes(n int64) Option {
 	}
 }
 
-// WithHTTPClient supplies a custom *http.Client. Its CheckRedirect is
-// honored as-is: when you need NEAR Data redirect semantics, prefer
-// configuring a custom http.Transport instead.
+// WithHTTPClient supplies a custom *http.Client. The SDK copies it without
+// changing the original, shares its Transport and Jar, and applies its redirect
+// safety checks before calling the custom CheckRedirect hook.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Config) error {
 		if hc == nil {
@@ -138,9 +139,12 @@ func WithHTTPClient(hc *http.Client) Option {
 // staging, proxies or local mocks.
 func WithBaseURL(f Family, rawURL string) Option {
 	return func(c *Config) error {
+		if _, ok := baseURLs[f]; !ok {
+			return fmt.Errorf("fastnear: unknown family %q", f)
+		}
 		u, err := url.Parse(rawURL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("fastnear: invalid base URL %q", rawURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(rawURL, "#") {
+			return errors.New("fastnear: base URL must be an absolute HTTP(S) URL without credentials, query or fragment")
 		}
 		if c.baseURLs == nil {
 			c.baseURLs = make(map[Family]string)
@@ -154,8 +158,8 @@ func WithBaseURL(f Family, rawURL string) Option {
 // "fastnear-go/<version> (+https://github.com/tigusigalpa/fastnear-go)".
 func WithUserAgent(ua string) Option {
 	return func(c *Config) error {
-		if ua == "" {
-			return errors.New("fastnear: user agent must not be empty")
+		if ua == "" || strings.ContainsFunc(ua, func(r rune) bool { return r < ' ' || r == 127 }) {
+			return errors.New("fastnear: user agent must be non-empty and contain no control characters")
 		}
 		c.userAgent = ua
 		return nil
@@ -186,7 +190,7 @@ func WithNonIdempotentRetry(enabled bool) Option {
 func WithMiddleware(mw func(req *http.Request, resp *http.Response, elapsed time.Duration)) Option {
 	return func(c *Config) error {
 		if mw != nil {
-			c.middleware = append(c.middleware, mw)
+			c.middleware = append(c.middleware, mw) //nolint:bodyclose // Hooks observe the response; the transport owns and closes its body.
 		}
 		return nil
 	}

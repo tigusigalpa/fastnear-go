@@ -17,6 +17,7 @@ type Iterator struct {
 	pages     int
 	lastToken *string
 	done      bool
+	seen      map[string]bool
 }
 
 // Token returns the current cursor position.
@@ -51,10 +52,17 @@ func (it *Iterator) Next(ctx context.Context) ([]TransferRow, bool, error) {
 	}
 	it.pages++
 	token := page.ResumeToken
-	if it.lastToken != nil && token == *it.lastToken {
+	if it.seen == nil {
+		it.seen = make(map[string]bool)
+		if it.query.ResumeToken != nil {
+			it.seen[*it.query.ResumeToken] = true
+		}
+	}
+	if token != "" && it.seen[token] {
 		it.done = true
 		return nil, false, &fastnearerr.Error{Op: family + ".query", Family: family, Code: "pagination_loop", Message: "server returned a repeated resume_token"}
 	}
+	it.seen[token] = true
 	it.lastToken = &token
 	it.query.ResumeToken = &token
 	if token == "" {

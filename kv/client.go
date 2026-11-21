@@ -38,11 +38,14 @@ type dtoPtr[T any] interface {
 
 func (c *Client) guard(op string) error {
 	op = family + "." + op
-	if c == nil || c.t == nil {
+	if c == nil {
 		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	if c.err != nil {
 		return &fastnearerr.Error{Op: op, Family: family, Code: "configuration_error", Message: c.err.Error(), Err: c.err}
+	}
+	if c.t == nil {
+		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	return nil
 }
@@ -246,7 +249,7 @@ func (c *Client) AllByPredecessor(ctx context.Context, predecessorID string, lim
 		return nil, validateErr("all_by_predecessor", err)
 	}
 	if limit != nil && (*limit < 1 || *limit > 200) {
-		return nil, validateErr("all_by_predecessor", errLimit(limit))
+		return nil, validateErr("all_by_predecessor", errLimit())
 	}
 	payload := map[string]any{}
 	if limit != nil {
@@ -294,7 +297,7 @@ func (e stringErr) Error() string { return string(e) }
 
 const errEmptyKey = stringErr("key must not be empty")
 
-func errLimit(l *uint32) error { return stringErr("limit must be in [1, 200]") }
+func errLimit() error { return stringErr("limit must be in [1, 200]") }
 
 func errTooManyKeys(n int) error {
 	return stringErr("keys is limited to 100, got " + strconv.Itoa(n))

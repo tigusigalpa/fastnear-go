@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -62,7 +63,8 @@ type dtoPtr[T any] interface {
 }
 
 // call executes one JSON-RPC method and returns the raw "result".
-// A JSON-RPC -32000 server error is retried exactly once.
+// A JSON-RPC -32000 server error is retried at most once, within the
+// configured transport retry limits and non-idempotent retry policy.
 func (c *Client) call(ctx context.Context, op, method string, params any, noRetry bool) (json.RawMessage, string, error) {
 	op = family + "." + op
 	if c == nil {
@@ -75,27 +77,7 @@ func (c *Client) call(ctx context.Context, op, method string, params any, noRetr
 		return nil, "", fastnearerr.Config(op, family, "uninitialized client")
 	}
 
-	retried := false
-	for {
-		result, reqURL, err := c.callOnce(ctx, op, method, params, noRetry)
-		if err == nil {
-			return result, reqURL, nil
-		}
-		var e *fastnearerr.Error
-		if retried || !asError(err, &e) || e.RPC == nil || e.RPC.Code != -32000 {
-			return nil, reqURL, err
-		}
-		retried = true
-	}
-}
-
-func asError(err error, out **fastnearerr.Error) bool {
-	e, ok := fastnearerr.As(err)
-	if !ok {
-		return false
-	}
-	*out = e
-	return true
+	return c.callOnce(ctx, op, method, params, noRetry)
 }
 
 // callOnce performs a single JSON-RPC round trip.
@@ -108,29 +90,49 @@ func (c *Client) callOnce(ctx context.Context, op, method string, params any, no
 	if err != nil {
 		return nil, "", &fastnearerr.Error{Op: op, Family: family, Code: "serialization_error", Message: "failed to encode request", Err: err}
 	}
-	resp, err := c.t.Do(ctx, transport.Request{Method: http.MethodPost, Body: body, Op: op, NoRetry: noRetry})
+	var frame rpcResponse
+	resp, err := c.t.Do(ctx, transport.Request{
+		Method: http.MethodPost, Body: body, Op: op, NoRetry: noRetry,
+		CheckResponse: func(resp *transport.Response) error {
+			frame = rpcResponse{}
+			if err := json.Unmarshal(resp.Body, &frame); err != nil {
+				return transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
+			}
+			if err := frame.validate(id); err != nil {
+				return transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
+			}
+			return frame.rpcError(op, resp.EffectiveURL, resp.Body)
+		},
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	var frame rpcResponse
-	if err := json.Unmarshal(resp.Body, &frame); err != nil {
-		return nil, resp.EffectiveURL, transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
-	}
-	if frame.Error != nil {
-		rpcErr := &fastnearerr.RPCError{
-			Code:    frame.Error.Code,
-			Message: frame.Error.Message,
-			Data:    jsonx.Clone(frame.Error.Data),
-		}
-		var meta struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(frame.Error.Data, &meta) == nil {
-			rpcErr.Name = meta.Name
-		}
-		return nil, resp.EffectiveURL, fastnearerr.NewRPC(op, family, resp.EffectiveURL, rpcErr, resp.Body)
-	}
 	return frame.Result, resp.EffectiveURL, nil
+}
+
+func (r rpcResponse) validate(expectedID string) error {
+	var id string
+	if r.JSONRPC != "2.0" || json.Unmarshal(r.ID, &id) != nil || id != expectedID {
+		return fmt.Errorf("invalid JSON-RPC version or response id")
+	}
+	if (len(r.Result) > 0) == (r.Error != nil) {
+		return fmt.Errorf("JSON-RPC response must contain exactly one of result or error")
+	}
+	return nil
+}
+
+func (r rpcResponse) rpcError(op, requestURL string, raw []byte) error {
+	if r.Error == nil {
+		return nil
+	}
+	e := &fastnearerr.RPCError{Code: r.Error.Code, Message: r.Error.Message, Data: jsonx.Clone(r.Error.Data)}
+	var meta struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(r.Error.Data, &meta) == nil {
+		e.Name = meta.Name
+	}
+	return fastnearerr.NewRPC(op, family, requestURL, e, raw)
 }
 
 // query is a shorthand for call with method "query".
@@ -316,7 +318,11 @@ func (c *Client) CallFunction(ctx context.Context, req CallFunctionRequest) (*Ca
 	if req.MethodName == "" {
 		return nil, validateErr("call_function", errEmptyArg("method_name"))
 	}
-	argsJSON, err := json.Marshal(req.Args)
+	args := req.Args
+	if args == nil {
+		args = struct{}{}
+	}
+	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return nil, &fastnearerr.Error{Op: family + ".call_function", Family: family, Code: "serialization_error", Message: "failed to encode args", Err: err}
 	}
@@ -534,7 +540,11 @@ func (c *Client) MaintenanceWindows(ctx context.Context, accountID string) (*Mai
 	if err != nil {
 		return nil, err
 	}
-	return decodeResult[MaintenanceWindows]("maintenance_windows", u, result)
+	windows, err := decodeResult[MaintenanceWindows]("maintenance_windows", u, result)
+	if windows != nil {
+		windows.AccountID = accountID
+	}
+	return windows, err
 }
 
 // ExperimentalProtocolConfig returns the protocol configuration.
@@ -544,7 +554,7 @@ func (c *Client) ExperimentalProtocolConfig(ctx context.Context, at *BlockRef) (
 	if at != nil {
 		ref = *at
 	}
-	params := map[string]any{"block_reference": ref.queryParams()}
+	params := ref.queryParams()
 	result, u, err := c.call(ctx, "experimental_protocol_config", "EXPERIMENTAL_protocol_config", params, false)
 	if err != nil {
 		return nil, err

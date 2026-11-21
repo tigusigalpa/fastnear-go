@@ -1,10 +1,12 @@
 package recipes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	fastnear "github.com/tigusigalpa/fastnear-go"
@@ -15,11 +17,17 @@ import (
 // root client with WithBaseURL per family.
 func newRoot(t *testing.T, handler http.Handler) *fastnear.Client {
 	t.Helper()
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+		handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	c, err := fastnear.NewClient(
 		fastnear.WithAPIKey("k"),
 		fastnear.WithMaxRetries(0),
+		fastnear.WithHTTPClient(srv.Client()),
 		fastnear.WithBaseURL(fastnear.FamilyAccounts, srv.URL),
 		fastnear.WithBaseURL(fastnear.FamilyRPC, srv.URL),
 		fastnear.WithBaseURL(fastnear.FamilyTx, srv.URL),
@@ -33,25 +41,32 @@ func newRoot(t *testing.T, handler http.Handler) *fastnear.Client {
 	return c
 }
 
-func rpcReply(result any) map[string]any {
-	return map[string]any{"jsonrpc": "2.0", "id": "x", "result": result}
+func rpcReply(r *http.Request, result any) map[string]any {
+	var frame struct {
+		ID string `json:"id"`
+	}
+	body, _ := r.GetBody()
+	defer func() { _ = body.Close() }()
+	_ = json.NewDecoder(body).Decode(&frame)
+	return map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": result}
 }
 
 // TestAccountSnapshot combines accounts.full + rpc.view_account.
 func TestAccountSnapshot(t *testing.T) {
 	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/account/root.near/full" {
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"account_id": "root.near",
 				"tokens":     []any{map[string]any{"contract_id": "wrap.near", "balance": "5"}},
 			})
 			return
 		}
-		// RPC call
-		json.NewEncoder(w).Encode(rpcReply(map[string]any{
-			"amount": "1500000000000000000000000", "locked": "0",
-			"storage_usage": 100, "block_height": 1, "block_hash": "H",
-		}))
+		_ =
+			// RPC call
+			json.NewEncoder(w).Encode(rpcReply(r, map[string]any{
+				"amount": "1500000000000000000000000", "locked": "0",
+				"storage_usage": 100, "block_height": 1, "block_hash": "H",
+			}))
 	}))
 	snap, err := New(root).AccountSnapshot(context.Background(), "root.near")
 	if err != nil {
@@ -70,7 +85,7 @@ func TestFTBalance(t *testing.T) {
 	var sawCall bool
 	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/account/a.near/ft" {
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"account_id": "a.near", "tokens": []any{},
 			})
 			return
@@ -82,7 +97,7 @@ func TestFTBalance(t *testing.T) {
 		for i := 0; i < len(quoted); i++ {
 			bytes = append(bytes, int(quoted[i]))
 		}
-		json.NewEncoder(w).Encode(rpcReply(map[string]any{
+		_ = json.NewEncoder(w).Encode(rpcReply(r, map[string]any{
 			"result": bytes, "block_height": 1, "block_hash": "H",
 		}))
 	}))
@@ -103,7 +118,7 @@ func TestViewCallJSON(t *testing.T) {
 		for i := 0; i < len(payload); i++ {
 			bytes = append(bytes, int(payload[i]))
 		}
-		json.NewEncoder(w).Encode(rpcReply(map[string]any{
+		_ = json.NewEncoder(w).Encode(rpcReply(r, map[string]any{
 			"result": bytes, "block_height": 1, "block_hash": "H",
 		}))
 	}))
@@ -125,7 +140,7 @@ func TestStateEntries(t *testing.T) {
 	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		params := req["params"].(map[string]any)
 		var lastKey any
 		var values []map[string]any
@@ -135,7 +150,7 @@ func TestStateEntries(t *testing.T) {
 		} else {
 			values = []map[string]any{{"key": "azM=", "value": "djM="}}
 		}
-		json.NewEncoder(w).Encode(rpcReply(map[string]any{
+		_ = json.NewEncoder(w).Encode(rpcReply(r, map[string]any{
 			"values": values, "last_key": lastKey,
 			"block_height": 1, "block_hash": "H",
 		}))
@@ -161,7 +176,7 @@ func TestKVValue(t *testing.T) {
 		if r.URL.EscapedPath() != "/v0/latest/social.near/root.near/graph%2Ffollow%2Fx.near" {
 			t.Errorf("path = %s", r.URL.EscapedPath())
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"entries": []map[string]any{{"key": "k", "value": map[string]any{"v": 7}}},
 		})
 	}))
@@ -176,8 +191,8 @@ func TestKVValue(t *testing.T) {
 
 // TestKVValueMissing: no entries → found=false.
 func TestKVValueMissing(t *testing.T) {
-	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"entries": []any{}})
+	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"entries": []any{}})
 	}))
 	found, err := New(root).KVValue(context.Background(), "a.near", "b.near", "k", nil)
 	if err != nil || found {
@@ -189,12 +204,12 @@ func TestKVValueMissing(t *testing.T) {
 func TestTxHistory(t *testing.T) {
 	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		next := ""
 		if body["resume_token"] == nil {
 			next = "p2"
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"account_txs":  []map[string]any{{"transaction_hash": "H"}},
 			"resume_token": next, "txs_count": 1,
 		})
@@ -213,8 +228,8 @@ func TestTxHistory(t *testing.T) {
 
 // TestTransferHistory streams transfer rows.
 func TestTransferHistory(t *testing.T) {
-	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"transfers":    []map[string]any{{"transaction_id": "H", "amount": "1"}},
 			"resume_token": "",
 		})
@@ -239,14 +254,14 @@ func TestTokenRegistry(t *testing.T) {
 	var methods []string
 	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/account/a.near/ft" {
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"account_id": "a.near",
 				"tokens":     []any{map[string]any{"contract_id": "usdt.tether-token.near", "balance": "1500000"}},
 			})
 			return
 		}
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		params := req["params"].(map[string]any)
 		methods = append(methods, params["method_name"].(string))
 		var payload string
@@ -260,7 +275,7 @@ func TestTokenRegistry(t *testing.T) {
 		for i := 0; i < len(payload); i++ {
 			bytes = append(bytes, int(payload[i]))
 		}
-		json.NewEncoder(w).Encode(rpcReply(map[string]any{
+		_ = json.NewEncoder(w).Encode(rpcReply(r, map[string]any{
 			"result": bytes, "block_height": 1, "block_hash": "H",
 		}))
 	}))
@@ -292,7 +307,7 @@ func TestTokenRegistry(t *testing.T) {
 
 // TestLatestFinalHeight parses the NEAR Data redirect.
 func TestLatestFinalHeight(t *testing.T) {
-	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	root := newRoot(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "/v0/block/4242")
 		w.WriteHeader(http.StatusFound)
 	}))

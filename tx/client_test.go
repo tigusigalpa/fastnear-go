@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,28 +14,28 @@ import (
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	tr := transport.New(transport.Params{
-		BaseURL: srv.URL, APIKey: "k", Family: family,
+		HTTPClient: srv.Client(), BaseURL: srv.URL, APIKey: "k", Family: family,
 		Timeout:  5 * time.Second,
 		Retry:    transport.RetryPolicy{MaxRetries: 0},
 		MaxBytes: 1 << 20,
 	})
-	return NewClient(tr, nil), srv
+	return NewClient(tr, nil)
 }
 
 // TestAccountHistory verifies the POST body and page decoding.
 func TestAccountHistory(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotMethod = r.URL.Path, r.Method
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &gotBody)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.Unmarshal(b, &gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"account_txs": []map[string]any{{
 				"account_id": "root.near", "transaction_hash": "H1",
 				"tx_block_height": 100, "tx_block_timestamp": "1700000000000",
@@ -72,19 +72,19 @@ func TestAccountHistory(t *testing.T) {
 // TestIteratorWalksPages follows resume_token until it comes back empty.
 func TestIteratorWalksPages(t *testing.T) {
 	var tokens []string
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &body)
+		_ = json.Unmarshal(b, &body)
 		tok, _ := body["resume_token"].(string)
 		tokens = append(tokens, tok)
 		if tok == "" {
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"account_txs":  []map[string]any{{"transaction_hash": "H1"}},
 				"resume_token": "next", "txs_count": 1,
 			})
 		} else {
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"account_txs":  []map[string]any{{"transaction_hash": "H2"}},
 				"resume_token": "", "txs_count": 1,
 			})
@@ -113,12 +113,12 @@ func TestIteratorWalksPages(t *testing.T) {
 // TestSeq streams all rows via iter.Seq2.
 func TestSeq(t *testing.T) {
 	calls := 0
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		tok := ""
 		b, _ := io.ReadAll(r.Body)
 		var body map[string]any
-		json.Unmarshal(b, &body)
+		_ = json.Unmarshal(b, &body)
 		if s, ok := body["resume_token"].(string); ok {
 			tok = s
 		}
@@ -126,7 +126,7 @@ func TestSeq(t *testing.T) {
 		if calls >= 3 {
 			next = ""
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"account_txs":  []map[string]any{{"transaction_hash": "H"}},
 			"resume_token": next, "txs_count": 1,
 		})
@@ -145,8 +145,8 @@ func TestSeq(t *testing.T) {
 
 // TestIteratorLoopDetection fails on a repeated resume_token.
 func TestIteratorLoopDetection(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"account_txs":  []map[string]any{{"transaction_hash": "H"}},
 			"resume_token": "same", "txs_count": 1,
 		})
@@ -165,12 +165,12 @@ func TestIteratorLoopDetection(t *testing.T) {
 // TestBlockByHeightAndHash checks the block_id variants.
 func TestBlockByHeightAndHash(t *testing.T) {
 	var ids []any
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &body)
+		_ = json.Unmarshal(b, &body)
 		ids = append(ids, body["block_id"])
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"block": map[string]any{"block_height": 5, "block_hash": "BH"},
 		})
 	})
@@ -194,8 +194,8 @@ func TestBlockByHeightAndHash(t *testing.T) {
 
 // TestBlockNull: block not indexed → JSON null → nil page.
 func TestBlockNull(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"block": null}`))
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"block": null}`))
 	})
 	p, err := c.Block(context.Background(), uint64(1), false, false)
 	if err != nil {
@@ -209,10 +209,10 @@ func TestBlockNull(t *testing.T) {
 // TestBlocks range query.
 func TestBlocks(t *testing.T) {
 	var got map[string]any
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &got)
-		json.NewEncoder(w).Encode(map[string]any{"blocks": []any{
+		_ = json.Unmarshal(b, &got)
+		_ = json.NewEncoder(w).Encode(map[string]any{"blocks": []any{
 			map[string]any{"block_height": 10}, map[string]any{"block_height": 9},
 		}})
 	})
@@ -234,16 +234,16 @@ func TestBlocks(t *testing.T) {
 // TestReceiptAndTransactions.
 func TestReceiptAndTransactions(t *testing.T) {
 	var paths []string
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		switch r.URL.Path {
 		case "/v0/receipt":
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"receipt":     map[string]any{"receipt_id": "R1"},
 				"transaction": map[string]any{"signer_id": "a.near"},
 			})
 		default:
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"transactions": []any{map[string]any{"hash": "H"}, nil},
 			})
 		}

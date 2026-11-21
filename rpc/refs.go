@@ -78,6 +78,8 @@ func (r BlockRef) queryParams() map[string]any {
 
 // mergeBlockRef copies the rendered reference into params.
 func mergeBlockRef(params map[string]any, at *BlockRef) {
+	delete(params, "finality")
+	delete(params, "block_id")
 	r := Final()
 	if at != nil {
 		r = *at

@@ -16,10 +16,14 @@ golangci-lint run
 
 ## Tests
 
-- Unit tests never touch the network (`httptest` only).
-- Fixtures live in `<family>/testdata/`; regenerate goldens with `go test -update`.
-- Integration tests require `FASTNEAR_API_KEY` and the `integration` build tag:
-  `FASTNEAR_API_KEY=... go test -tags=integration ./...`
+- Unit tests use `internal/testutil` HTTP servers over `net.Pipe`. They exercise
+  HTTP encoding, redirects and cancellation without opening network sockets.
+- Keep fixtures alongside the tests, use synthetic credentials, and add a
+  regression test when fixing a behavior bug.
+- Build the runnable examples separately: `cd examples && go build ./...`.
+- Live integration tests require the `integration` build tag and the explicit
+  `FASTNEAR_INTEGRATION=1` switch. An API key is optional for anonymous access:
+  `FASTNEAR_API_KEY=... FASTNEAR_INTEGRATION=1 go test -tags=integration ./...`.
 
 ## Rules
 

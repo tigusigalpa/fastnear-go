@@ -25,8 +25,8 @@ type TokenBalance struct {
 	Meta TokenMeta
 }
 
-// TokenRegistry resolves ft_metadata once per contract and caches it
-// for the lifetime of the registry. It also fetches ft_balance_of.
+// TokenRegistry resolves ft_metadata and caches successful responses for the
+// lifetime of the registry. It also fetches ft_balance_of.
 // Safe for concurrent use.
 type TokenRegistry struct {
 	rpc *rpc.Client
@@ -46,8 +46,9 @@ func NewTokenRegistry(c *fastnear.Client) *TokenRegistry {
 func (r *TokenRegistry) Metadata(ctx context.Context, tokenID string) (*TokenMeta, error) {
 	r.mu.Lock()
 	if m, ok := r.cache[tokenID]; ok {
+		copyMeta := cloneMeta(m)
 		r.mu.Unlock()
-		return m, nil
+		return copyMeta, nil
 	}
 	r.mu.Unlock()
 
@@ -68,7 +69,16 @@ func (r *TokenRegistry) Metadata(ctx context.Context, tokenID string) (*TokenMet
 	r.mu.Lock()
 	r.cache[tokenID] = m
 	r.mu.Unlock()
-	return m, nil
+	return cloneMeta(m), nil
+}
+
+func cloneMeta(m *TokenMeta) *TokenMeta {
+	copyMeta := *m
+	if m.Icon != nil {
+		icon := *m.Icon
+		copyMeta.Icon = &icon
+	}
+	return &copyMeta
 }
 
 // Forget evicts a cached metadata entry (e.g. after a token upgrade).

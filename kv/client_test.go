@@ -3,26 +3,26 @@ package kv
 import (
 	"context"
 	"encoding/json"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	tr := transport.New(transport.Params{
-		BaseURL: srv.URL, APIKey: "k", Family: family,
+		HTTPClient: srv.Client(), BaseURL: srv.URL, APIKey: "k", Family: family,
 		Timeout:  5 * time.Second,
 		Retry:    transport.RetryPolicy{MaxRetries: 0},
 		MaxBytes: 1 << 20,
 	})
-	return NewClient(tr, nil), srv
+	return NewClient(tr, nil)
 }
 
 // TestPaths covers all nine KV operations.
@@ -74,9 +74,9 @@ func TestPaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotPath, gotMethod string
-			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotMethod = r.URL.EscapedPath(), r.Method
-				w.Write([]byte(`{"entries":[]}`))
+				_, _ = w.Write([]byte(`{"entries":[]}`))
 			})
 			if err := tc.call(c); err != nil {
 				t.Fatalf("call: %v", err)
@@ -91,9 +91,9 @@ func TestPaths(t *testing.T) {
 // TestExactKeyQueryParams checks GET query flags.
 func TestExactKeyQueryParams(t *testing.T) {
 	var gotQuery string
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		w.Write([]byte(`{"entries":[]}`))
+		_, _ = w.Write([]byte(`{"entries":[]}`))
 	})
 	lim, tok := uint32(7), "pt"
 	_, err := c.HistoryByExactKey(context.Background(), "a.near", "b.near", "k", true, &lim, true, &tok)
@@ -119,10 +119,10 @@ func contains(s, sub string) bool {
 // TestLatestBody checks the POST body marshalling.
 func TestLatestBody(t *testing.T) {
 	var got map[string]any
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &got)
-		w.Write([]byte(`{"entries":[{"key":"k","value":{"a":1}}],"page_token":"nxt"}`))
+		_ = json.Unmarshal(b, &got)
+		_, _ = w.Write([]byte(`{"entries":[{"key":"k","value":{"a":1}}],"page_token":"nxt"}`))
 	})
 	k, lim := "k1", uint32(50)
 	l, err := c.LatestByAccount(context.Background(), "social.near", LatestQuery{
@@ -145,7 +145,7 @@ func TestLatestBody(t *testing.T) {
 
 // TestValidation covers local checks.
 func TestValidation(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("no request expected")
 	})
 	if _, err := c.LatestByExactKey(context.Background(), "a.near", "b.near", "", false); err == nil {
@@ -172,8 +172,8 @@ func TestValidation(t *testing.T) {
 
 // TestMulti decodes the multi response with a null slot.
 func TestMulti(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"entries":[{"key":"k1","value":null},null]}`))
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"entries":[{"key":"k1","value":null},null]}`))
 	})
 	m, err := c.Multi(context.Background(), []string{"a.near/b.near/k1", "a.near/b.near/k2"}, false)
 	if err != nil || m == nil {
@@ -190,16 +190,16 @@ func TestMulti(t *testing.T) {
 // TestIteratorWalksPages follows page_token (absent = end).
 func TestIteratorWalksPages(t *testing.T) {
 	calls := 0
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &body)
+		_ = json.Unmarshal(b, &body)
 		if _, has := body["page_token"]; has {
-			w.Write([]byte(`{"entries":[{"key":"k2"}]}`)) // no page_token = last page
+			_, _ = w.Write([]byte(`{"entries":[{"key":"k2"}]}`)) // no page_token = last page
 			return
 		}
-		w.Write([]byte(`{"entries":[{"key":"k1"}],"page_token":"p1"}`))
+		_, _ = w.Write([]byte(`{"entries":[{"key":"k1"}],"page_token":"p1"}`))
 	})
 	it := NewIterator(func(token *string) (*List, error) {
 		return c.LatestByAccount(context.Background(), "social.near", LatestQuery{PageToken: token})

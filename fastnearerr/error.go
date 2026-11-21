@@ -93,7 +93,12 @@ func (e *Error) Error() string {
 
 // Unwrap exposes the underlying error so errors.Is/As work, e.g.
 // errors.Is(err, context.DeadlineExceeded) after a timeout.
-func (e *Error) Unwrap() error { return e.Err }
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 // Temporary reports whether the failure is worth retrying.
 func (e *Error) Temporary() bool { return IsRetryable(e) }
@@ -142,15 +147,15 @@ func Config(op, family, message string) *Error {
 
 func truncate(b []byte) []byte {
 	if len(b) > maxRawBody {
-		return b[:maxRawBody]
+		b = b[:maxRawBody]
 	}
-	return b
+	return append([]byte(nil), b...)
 }
 
 // As extracts an *Error from an error chain.
 func As(err error) (*Error, bool) {
 	var e *Error
-	if errors.As(err, &e) {
+	if errors.As(err, &e) && e != nil {
 		return e, true
 	}
 	return nil, false

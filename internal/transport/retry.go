@@ -36,20 +36,23 @@ func DefaultRetryPolicy() RetryPolicy {
 }
 
 // backoff computes the jittered delay for attempt n (0-based retry no).
-// delay = min(cap, base * 2^attempt) * random(0.5..1.0)
+// delay = min(cap, base * 2^attempt) * random(0..1)
 func (p RetryPolicy) backoff(attempt int) time.Duration {
 	d := p.BaseDelay
+	if d > p.MaxDelay {
+		d = p.MaxDelay
+	}
 	for i := 0; i < attempt; i++ {
-		d *= 2
-		if d >= p.MaxDelay {
+		if d > p.MaxDelay/2 {
 			d = p.MaxDelay
 			break
 		}
+		d *= 2
 	}
 	if d > p.MaxDelay {
 		d = p.MaxDelay
 	}
-	return time.Duration(float64(d) * (0.5 + rand.Float64()*0.5))
+	return time.Duration(float64(d) * rand.Float64())
 }
 
 func (p RetryPolicy) sleep(ctx context.Context, d time.Duration) error {

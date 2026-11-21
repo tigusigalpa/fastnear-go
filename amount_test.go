@@ -2,6 +2,37 @@ package fastnear
 
 import "testing"
 
+func TestNegativeAmountsAndZeroValueArithmetic(t *testing.T) {
+	for _, tc := range []struct{ a, b, want string }{
+		{"1", "1.5", "-0.5"}, {"1", "3.25", "-2.25"}, {"0", "1", "-1"},
+	} {
+		got := MustFromNEAR(tc.a).Sub(MustFromNEAR(tc.b))
+		if got.NEAR() != tc.want {
+			t.Fatalf("%s - %s = %s", tc.a, tc.b, got.NEAR())
+		}
+	}
+	var zero Amount
+	var nilAmount *Amount
+	if zero.Add(nilAmount).Yocto() != "0" || nilAmount.Cmp(&zero) != 0 {
+		t.Fatal("zero-value arithmetic failed")
+	}
+	if zero.Sub(MustFromNEAR("0.5")).NEAR() != "-0.5" {
+		t.Fatal("zero subtraction failed")
+	}
+	for _, tc := range []struct {
+		raw       string
+		decimals  uint8
+		precision int
+		want      string
+	}{
+		{"123", 2, -1, "1"}, {"-123", 2, 2, "-1.23"}, {"-5", 2, 2, "-0.05"}, {"0", 0, -100, "0"},
+	} {
+		if got := (TokenAmount{Raw: tc.raw, Decimals: tc.decimals}).Format(tc.precision); got != tc.want {
+			t.Fatalf("format(%+v) = %q", tc, got)
+		}
+	}
+}
+
 func TestFromNEAR(t *testing.T) {
 	cases := []struct{ in, yocto, near string }{
 		{"1", "1000000000000000000000000", "1"},
@@ -74,7 +105,7 @@ func TestAmountArithmetic(t *testing.T) {
 	if a.Sub(b).NEAR() != "1.5" {
 		t.Fatalf("Sub = %q", a.Sub(b).NEAR())
 	}
-	if a.Cmp(b) != 1 || b.Cmp(a) != -1 || a.Cmp(a) != 0 {
+	if a.Cmp(b) != 1 || b.Cmp(a) != -1 {
 		t.Fatal("Cmp wrong")
 	}
 	if !MustFromNEAR("0").IsZero() || a.IsZero() {

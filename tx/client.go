@@ -38,7 +38,7 @@ type dtoPtr[T any] interface {
 
 // post performs a POST request with a JSON body and decodes a
 // successful response into a new T. JSON null yields (nil, nil).
-func post[T any, P dtoPtr[T]](c *Client, ctx context.Context, op string, segs []string, payload any) (*T, error) {
+func post[T any, P dtoPtr[T]](ctx context.Context, c *Client, op string, segs []string, payload any) (*T, error) {
 	op = family + "." + op
 	if c == nil {
 		return nil, fastnearerr.Config(op, family, "uninitialized client")
@@ -84,7 +84,7 @@ func (c *Client) AccountHistory(ctx context.Context, q AccountHistoryQuery) (*Ac
 	if err := validateQuery(q); err != nil {
 		return nil, validateErr("account", err)
 	}
-	return post[AccountHistoryPage](c, ctx, "account", []string{"v0", "account"}, q.marshal())
+	return post[AccountHistoryPage](ctx, c, "account", []string{"v0", "account"}, q.marshal())
 }
 
 // AccountHistoryIterator returns a paginated iterator over the
@@ -129,7 +129,7 @@ func (c *Client) Block(ctx context.Context, blockID any, withTransactions, withR
 	if withReceipts {
 		payload["with_receipts"] = true
 	}
-	return post[BlockPage](c, ctx, "block", []string{"v0", "block"}, payload)
+	return post[BlockPage](ctx, c, "block", []string{"v0", "block"}, payload)
 }
 
 // Blocks returns indexed blocks in a height range. limit is 1..100.
@@ -151,7 +151,7 @@ func (c *Client) Blocks(ctx context.Context, q BlocksQuery) (*BlocksPage, error)
 	if q.Desc {
 		payload["desc"] = true
 	}
-	return post[BlocksPage](c, ctx, "blocks", []string{"v0", "blocks"}, payload)
+	return post[BlocksPage](ctx, c, "blocks", []string{"v0", "blocks"}, payload)
 }
 
 // Receipt returns an indexed receipt; both fields are nil when the
@@ -161,7 +161,7 @@ func (c *Client) Receipt(ctx context.Context, receiptID string) (*ReceiptPage, e
 	if receiptID == "" {
 		return nil, validateErr("receipt", errors.New("receipt_id must not be empty"))
 	}
-	return post[ReceiptPage](c, ctx, "receipt", []string{"v0", "receipt"}, map[string]any{"receipt_id": receiptID})
+	return post[ReceiptPage](ctx, c, "receipt", []string{"v0", "receipt"}, map[string]any{"receipt_id": receiptID})
 }
 
 // Transactions fetches up to 20 transactions by hash.
@@ -173,7 +173,7 @@ func (c *Client) Transactions(ctx context.Context, txHashes []string) (*Transact
 	if len(txHashes) > 20 {
 		return nil, validateErr("transactions", fmt.Errorf("tx_hashes is limited to 20, got %d", len(txHashes)))
 	}
-	return post[TransactionsPage](c, ctx, "transactions", []string{"v0", "transactions"}, map[string]any{"tx_hashes": txHashes})
+	return post[TransactionsPage](ctx, c, "transactions", []string{"v0", "transactions"}, map[string]any{"tx_hashes": txHashes})
 }
 
 // BlocksQuery describes /v0/blocks.

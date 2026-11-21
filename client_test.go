@@ -1,9 +1,57 @@
 package fastnear
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/tigusigalpa/fastnear-go/transfers"
 )
+
+func TestSharedPoolAndTestnetConfigurationError(t *testing.T) {
+	c, err := NewClient(WithConnectTimeout(123 * time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Accounts()
+	pool := c.httpClient
+	_ = c.RPC()
+	if pool != c.httpClient {
+		t.Fatal("families created separate root pools")
+	}
+	if pool.Transport.(*http.Transport).TLSHandshakeTimeout != 123*time.Millisecond {
+		t.Fatal("root ignored connection timeout")
+	}
+	testnet, _ := NewClient(WithTestnet())
+	_, err = testnet.Transfers().Query(context.Background(), transfers.Query{})
+	if err == nil || !strings.Contains(err.Error(), "mainnet-only") {
+		t.Fatalf("configuration cause lost: %v", err)
+	}
+}
+
+func TestRejectUnsafeOptionsAndMaskConfig(t *testing.T) {
+	for _, option := range []Option{
+		WithBaseURL(FamilyRPC, "ftp://example.test"),
+		WithBaseURL(FamilyRPC, "https://user:password@example.test"),
+		WithBaseURL(FamilyRPC, "https://example.test?apiKey=secret"),
+		WithBaseURL(FamilyRPC, "https://example.test#part"),
+		WithBaseURL("unknown", "https://example.test"),
+		WithAPIKey("key\x00bad"), WithUserAgent("agent\r\nInjected: x"),
+	} {
+		if _, err := NewClient(option); err == nil {
+			t.Fatal("unsafe option accepted")
+		}
+	}
+	c, _ := NewClient(WithAPIKey("private-secret-1234"))
+	for _, value := range []string{fmt.Sprintf("%v", c.Config()), fmt.Sprintf("%+v", c.Config()), fmt.Sprintf("%#v", c.Config())} {
+		if strings.Contains(value, "private-secret") {
+			t.Fatalf("config leaked key: %s", value)
+		}
+	}
+}
 
 func TestNewClientDefaults(t *testing.T) {
 	c, err := NewClient(WithAPIKey("key-1234"))

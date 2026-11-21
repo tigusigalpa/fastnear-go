@@ -3,8 +3,8 @@ package accounts
 import (
 	"context"
 	"errors"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -12,17 +12,17 @@ import (
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	tr := transport.New(transport.Params{
-		BaseURL: srv.URL, APIKey: "k", Family: family,
+		HTTPClient: srv.Client(), BaseURL: srv.URL, APIKey: "k", Family: family,
 		Timeout:  5 * time.Second,
 		Retry:    transport.RetryPolicy{MaxRetries: 0},
 		MaxBytes: 1 << 20,
 	})
-	return NewClient(tr, nil), srv
+	return NewClient(tr, nil)
 }
 
 // TestPaths verifies the request path and method of all 14 operations.
@@ -59,9 +59,9 @@ func TestPaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotPath, gotMethod, gotAuth string
-			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 				gotPath, gotMethod, gotAuth = r.URL.Path, r.Method, r.Header.Get("Authorization")
-				w.Write([]byte(`{}`))
+				_, _ = w.Write([]byte(`{}`))
 			})
 			if err := tc.call(c); err != nil {
 				t.Fatalf("call: %v", err)
@@ -80,8 +80,8 @@ func TestPaths(t *testing.T) {
 }
 
 func TestAccountFullDecode(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
 			"account_id": "root.near",
 			"pools": [{"pool_id": "pool.near", "last_update_block_height": 100}],
 			"tokens": [{"contract_id": "wrap.near", "balance": "1500", "last_update_block_height": 99}],
@@ -105,7 +105,7 @@ func TestAccountFullDecode(t *testing.T) {
 }
 
 func TestPublicKeyValidation(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("request must not be sent for invalid key")
 	})
 	for _, bad := range []string{"", "abc", "rsa:xx", "ed25519:"} {
@@ -118,7 +118,7 @@ func TestPublicKeyValidation(t *testing.T) {
 }
 
 func TestAccountIDValidation(t *testing.T) {
-	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("request must not be sent for invalid id")
 	})
 	for _, bad := range []string{"", "has space.near", "has/slash", string(make([]byte, 65))} {

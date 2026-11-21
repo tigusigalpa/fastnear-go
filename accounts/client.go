@@ -37,7 +37,7 @@ type dtoPtr[T any] interface {
 
 // get performs a GET request and decodes a successful JSON body into a
 // new T. A JSON null yields (nil, nil) without an error.
-func get[T any, P dtoPtr[T]](c *Client, ctx context.Context, op string, segs ...string) (*T, error) {
+func get[T any, P dtoPtr[T]](ctx context.Context, c *Client, op string, segs ...string) (*T, error) {
 	op = family + "." + op
 	if c == nil {
 		return nil, fastnearerr.Config(op, family, "uninitialized client")
@@ -72,13 +72,13 @@ func validateErr(op string, err error) error {
 // Health reports whether the service is up.
 // See https://docs.fastnear.com/api/system/health
 func (c *Client) Health(ctx context.Context) (*Health, error) {
-	return get[Health](c, ctx, "health", "health")
+	return get[Health](ctx, c, "health", "health")
 }
 
 // Status returns indexer sync state: heights, latency, version.
 // See https://docs.fastnear.com/api/system/status
 func (c *Client) Status(ctx context.Context) (*ServiceStatus, error) {
-	return get[ServiceStatus](c, ctx, "status", "status")
+	return get[ServiceStatus](ctx, c, "status", "status")
 }
 
 // FTContracts lists FT contract ids the account interacted with (v0).
@@ -90,7 +90,7 @@ func (c *Client) FTContracts(ctx context.Context, accountID string) (*ContractID
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("ft_contracts", err)
 	}
-	return get[ContractIDs](c, ctx, "ft_contracts", "v0", "account", accountID, "ft")
+	return get[ContractIDs](ctx, c, "ft_contracts", "v0", "account", accountID, "ft")
 }
 
 // NFTContracts lists NFT contract ids the account interacted with (v0).
@@ -102,7 +102,7 @@ func (c *Client) NFTContracts(ctx context.Context, accountID string) (*ContractI
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("nft_contracts", err)
 	}
-	return get[ContractIDs](c, ctx, "nft_contracts", "v0", "account", accountID, "nft")
+	return get[ContractIDs](ctx, c, "nft_contracts", "v0", "account", accountID, "nft")
 }
 
 // StakingPools lists staking pool ids of the account (v0).
@@ -114,7 +114,7 @@ func (c *Client) StakingPools(ctx context.Context, accountID string) (*PoolIDs, 
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("staking_pools", err)
 	}
-	return get[PoolIDs](c, ctx, "staking_pools", "v0", "account", accountID, "staking")
+	return get[PoolIDs](ctx, c, "staking_pools", "v0", "account", accountID, "staking")
 }
 
 // PublicKeyAccounts resolves a public key to the accounts that can use
@@ -124,7 +124,7 @@ func (c *Client) PublicKeyAccounts(ctx context.Context, publicKey string) (*Publ
 	if err := validate.PublicKey(publicKey); err != nil {
 		return nil, validateErr("public_key_accounts", err)
 	}
-	return get[PublicKeyLookup](c, ctx, "public_key_accounts", "v1", "public_key", publicKey)
+	return get[PublicKeyLookup](ctx, c, "public_key_accounts", "v1", "public_key", publicKey)
 }
 
 // PublicKeyAccountsAll resolves a public key to all accounts, including
@@ -134,7 +134,7 @@ func (c *Client) PublicKeyAccountsAll(ctx context.Context, publicKey string) (*P
 	if err := validate.PublicKey(publicKey); err != nil {
 		return nil, validateErr("public_key_accounts_all", err)
 	}
-	return get[PublicKeyLookup](c, ctx, "public_key_accounts_all", "v1", "public_key", publicKey, "all")
+	return get[PublicKeyLookup](ctx, c, "public_key_accounts_all", "v1", "public_key", publicKey, "all")
 }
 
 // PublicKeyAccountsLegacy resolves a public key to accounts (v0).
@@ -145,7 +145,7 @@ func (c *Client) PublicKeyAccountsLegacy(ctx context.Context, publicKey string) 
 	if err := validate.PublicKey(publicKey); err != nil {
 		return nil, validateErr("public_key_accounts_legacy", err)
 	}
-	return get[PublicKeyLookup](c, ctx, "public_key_accounts_legacy", "v0", "public_key", publicKey)
+	return get[PublicKeyLookup](ctx, c, "public_key_accounts_legacy", "v0", "public_key", publicKey)
 }
 
 // PublicKeyAccountsAllLegacy resolves a public key to all accounts (v0).
@@ -156,7 +156,7 @@ func (c *Client) PublicKeyAccountsAllLegacy(ctx context.Context, publicKey strin
 	if err := validate.PublicKey(publicKey); err != nil {
 		return nil, validateErr("public_key_accounts_all_legacy", err)
 	}
-	return get[PublicKeyLookup](c, ctx, "public_key_accounts_all_legacy", "v0", "public_key", publicKey, "all")
+	return get[PublicKeyLookup](ctx, c, "public_key_accounts_all_legacy", "v0", "public_key", publicKey, "all")
 }
 
 // FTBalances returns fungible-token balances of the account (v1).
@@ -165,7 +165,7 @@ func (c *Client) FTBalances(ctx context.Context, accountID string) (*FTBalances,
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("ft_balances", err)
 	}
-	return get[FTBalances](c, ctx, "ft_balances", "v1", "account", accountID, "ft")
+	return get[FTBalances](ctx, c, "ft_balances", "v1", "account", accountID, "ft")
 }
 
 // NFTHoldings returns NFT contract holdings of the account (v1).
@@ -174,7 +174,7 @@ func (c *Client) NFTHoldings(ctx context.Context, accountID string) (*NFTHolding
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("nft_holdings", err)
 	}
-	return get[NFTHoldings](c, ctx, "nft_holdings", "v1", "account", accountID, "nft")
+	return get[NFTHoldings](ctx, c, "nft_holdings", "v1", "account", accountID, "nft")
 }
 
 // Staking returns staking pools of the account (v1).
@@ -183,7 +183,7 @@ func (c *Client) Staking(ctx context.Context, accountID string) (*StakingPools, 
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("staking", err)
 	}
-	return get[StakingPools](c, ctx, "staking", "v1", "account", accountID, "staking")
+	return get[StakingPools](ctx, c, "staking", "v1", "account", accountID, "staking")
 }
 
 // AccountFull returns the combined indexed account view: staking
@@ -193,7 +193,7 @@ func (c *Client) AccountFull(ctx context.Context, accountID string) (*AccountFul
 	if err := validate.AccountID(accountID); err != nil {
 		return nil, validateErr("account_full", err)
 	}
-	return get[AccountFull](c, ctx, "account_full", "v1", "account", accountID, "full")
+	return get[AccountFull](ctx, c, "account_full", "v1", "account", accountID, "full")
 }
 
 // FTTopHolders returns the top holders of a fungible token. The list
@@ -203,5 +203,5 @@ func (c *Client) FTTopHolders(ctx context.Context, tokenID string) (*FTTopHolder
 	if err := validate.AccountID(tokenID); err != nil {
 		return nil, validateErr("ft_top_holders", err)
 	}
-	return get[FTTopHolders](c, ctx, "ft_top_holders", "v1", "ft", tokenID, "top")
+	return get[FTTopHolders](ctx, c, "ft_top_holders", "v1", "ft", tokenID, "top")
 }

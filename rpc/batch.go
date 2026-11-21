@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/tigusigalpa/fastnear-go/fastnearerr"
-	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
 	"github.com/tigusigalpa/fastnear-go/internal/transport"
 )
 
@@ -65,12 +64,24 @@ func (c *Client) Batch(ctx context.Context, calls ...Call) (*BatchResult, error)
 
 	frames := make([]envelope, len(calls))
 	ops := make([]string, len(calls))
+	noRetry := false
 	for i, call := range calls {
+		if call.Method == "" {
+			return nil, fastnearerr.Validation(op, family, "batch method must not be empty")
+		}
+		switch call.Method {
+		case "send_tx", "broadcast_tx_async", "broadcast_tx_commit":
+			noRetry = true
+		}
+		params := call.Params
+		if params == nil {
+			params = []any{}
+		}
 		frames[i] = envelope{
 			JSONRPC: "2.0",
 			ID:      "fastnear-" + strconv.FormatUint(c.ids.Add(1), 10),
 			Method:  call.Method,
-			Params:  call.Params,
+			Params:  params,
 		}
 		ops[i] = call.Op
 		if ops[i] == "" {
@@ -81,7 +92,7 @@ func (c *Client) Batch(ctx context.Context, calls ...Call) (*BatchResult, error)
 	if err != nil {
 		return nil, &fastnearerr.Error{Op: op, Family: family, Code: "serialization_error", Message: "failed to encode batch", Err: err}
 	}
-	resp, err := c.t.Do(ctx, transport.Request{Method: http.MethodPost, Body: body, Op: op})
+	resp, err := c.t.Do(ctx, transport.Request{Method: http.MethodPost, Body: body, Op: op, NoRetry: noRetry})
 	if err != nil {
 		return nil, err
 	}
@@ -91,11 +102,23 @@ func (c *Client) Batch(ctx context.Context, calls ...Call) (*BatchResult, error)
 		return nil, transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
 	}
 	byID := make(map[string]rpcResponse, len(items))
+	expected := make(map[string]bool, len(frames))
+	for _, frame := range frames {
+		expected[frame.ID] = true
+	}
 	for _, item := range items {
 		var id string
-		if json.Unmarshal(item.ID, &id) == nil {
-			byID[id] = item
+		if err := json.Unmarshal(item.ID, &id); err != nil {
+			return nil, transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
 		}
+		_, duplicate := byID[id]
+		if !expected[id] || duplicate {
+			return nil, fastnearerr.New(op, family, 200, "serialization_error", "unexpected or duplicate batch response id", resp.Body, nil)
+		}
+		if err := item.validate(id); err != nil {
+			return nil, transport.SerializationError(op, family, resp.EffectiveURL, resp.Body, err)
+		}
+		byID[id] = item
 	}
 
 	out := &BatchResult{
@@ -109,18 +132,8 @@ func (c *Client) Batch(ctx context.Context, calls ...Call) (*BatchResult, error)
 			continue
 		}
 		if item.Error != nil {
-			rpcErr := &fastnearerr.RPCError{
-				Code:    item.Error.Code,
-				Message: item.Error.Message,
-				Data:    jsonx.Clone(item.Error.Data),
-			}
-			var meta struct {
-				Name string `json:"name"`
-			}
-			if json.Unmarshal(item.Error.Data, &meta) == nil {
-				rpcErr.Name = meta.Name
-			}
-			out.Errors[i] = fastnearerr.NewRPC(ops[i], family, resp.EffectiveURL, rpcErr, item.Result)
+			out.Errors[i], _ = fastnearerr.As(item.rpcError(ops[i], resp.EffectiveURL, resp.Body))
+			out.Errors[i] = c.t.RedactError(out.Errors[i])
 			continue
 		}
 		out.Responses[i] = item.Result

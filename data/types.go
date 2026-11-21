@@ -2,6 +2,7 @@ package data
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/tigusigalpa/fastnear-go/internal/jsonx"
@@ -33,21 +34,14 @@ type BlockHeader struct {
 }
 
 // Time parses the nanosecond timestamp into time.Time, falling back
-// to the microsecond `timestamp` field when the nanosecond string is
+// to the nanosecond `timestamp` field when the nanosecond string is
 // absent or malformed.
 func (h *BlockHeader) Time() (time.Time, error) {
-	var ns int64
-	for i := 0; i < len(h.TimestampNanosec) && i < 19; i++ {
-		c := h.TimestampNanosec[i]
-		if c < '0' || c > '9' {
-			break
-		}
-		ns = ns*10 + int64(c-'0')
+	ns, err := strconv.ParseUint(h.TimestampNanosec, 10, 64)
+	if err != nil {
+		ns = h.Timestamp
 	}
-	if ns == 0 {
-		return time.Unix(0, int64(h.Timestamp)), nil
-	}
-	return time.Unix(0, ns), nil
+	return time.Unix(int64(ns/1e9), int64(ns%1e9)), nil
 }
 
 // ChunkHeader is the chunk descriptor inside a block envelope.

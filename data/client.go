@@ -42,18 +42,21 @@ type dtoPtr[T any] interface {
 
 func (c *Client) guard(op string) error {
 	op = family + "." + op
-	if c == nil || c.t == nil {
+	if c == nil {
 		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	if c.err != nil {
 		return &fastnearerr.Error{Op: op, Family: family, Code: "configuration_error", Message: c.err.Error(), Err: c.err}
+	}
+	if c.t == nil {
+		return fastnearerr.Config(op, family, "uninitialized client")
 	}
 	return nil
 }
 
 // get issues a GET and decodes a successful response into a new T.
 // noFollow returns the raw 3xx response instead of following it.
-func get[T any, P dtoPtr[T]](c *Client, ctx context.Context, op string, segs []string, noFollow bool) (*T, *transport.Response, error) {
+func get[T any, P dtoPtr[T]](ctx context.Context, c *Client, op string, segs []string, noFollow bool) (*T, *transport.Response, error) {
 	if err := c.guard(op); err != nil {
 		return nil, nil, err
 	}
@@ -84,7 +87,7 @@ func get[T any, P dtoPtr[T]](c *Client, ctx context.Context, op string, segs []s
 // Health probes the service.
 // See https://docs.fastnear.com/neardata/system/health
 func (c *Client) Health(ctx context.Context) (*Health, error) {
-	h, _, err := get[Health](c, ctx, "health", []string{"health"}, false)
+	h, _, err := get[Health](ctx, c, "health", []string{"health"}, false)
 	return h, err
 }
 
@@ -92,7 +95,7 @@ func (c *Client) Health(ctx context.Context) (*Health, error) {
 // answers 302 to the archived block; the transport follows it.
 // See https://docs.fastnear.com/neardata/blocks/first
 func (c *Client) FirstBlock(ctx context.Context) (*BlockDocument, error) {
-	doc, _, err := get[BlockDocument](c, ctx, "first_block", []string{"v0", "first_block"}, false)
+	doc, _, err := get[BlockDocument](ctx, c, "first_block", []string{"v0", "first_block"}, false)
 	return doc, err
 }
 
@@ -105,7 +108,7 @@ func (c *Client) FirstBlockHeight(ctx context.Context) (uint64, error) {
 // LastBlockFinal returns the last FINAL block document.
 // See https://docs.fastnear.com/neardata/blocks/last-final
 func (c *Client) LastBlockFinal(ctx context.Context) (*BlockDocument, error) {
-	doc, _, err := get[BlockDocument](c, ctx, "last_block_final", []string{"v0", "last_block", "final"}, false)
+	doc, _, err := get[BlockDocument](ctx, c, "last_block_final", []string{"v0", "last_block", "final"}, false)
 	return doc, err
 }
 
@@ -113,7 +116,7 @@ func (c *Client) LastBlockFinal(ctx context.Context) (*BlockDocument, error) {
 // block document. Upstream answers 302 to /v0/block_opt/{h}.
 // See https://docs.fastnear.com/neardata/blocks/last-optimistic
 func (c *Client) LastBlockOptimistic(ctx context.Context) (*BlockDocument, error) {
-	doc, _, err := get[BlockDocument](c, ctx, "last_block_optimistic", []string{"v0", "last_block", "optimistic"}, false)
+	doc, _, err := get[BlockDocument](ctx, c, "last_block_optimistic", []string{"v0", "last_block", "optimistic"}, false)
 	return doc, err
 }
 
@@ -134,7 +137,7 @@ func (c *Client) LastOptimisticHeight(ctx context.Context) (uint64, error) {
 // If the endpoint answers 200 JSON instead, the height is decoded
 // from the block document's header.
 func (c *Client) resolveHeight(ctx context.Context, op string, segs []string) (uint64, error) {
-	doc, resp, err := get[BlockDocument](c, ctx, op, segs, true)
+	doc, resp, err := get[BlockDocument](ctx, c, op, segs, true)
 	if err != nil {
 		return 0, err
 	}
@@ -158,7 +161,7 @@ func (c *Client) resolveHeight(ctx context.Context, op string, segs []string) (u
 // doc.Block.Header.Height when it matters).
 // See https://docs.fastnear.com/neardata/blocks/block
 func (c *Client) Block(ctx context.Context, height uint64) (*BlockDocument, error) {
-	doc, _, err := get[BlockDocument](c, ctx, "block", []string{"v0", "block", strconv.FormatUint(height, 10)}, false)
+	doc, _, err := get[BlockDocument](ctx, c, "block", []string{"v0", "block", strconv.FormatUint(height, 10)}, false)
 	return doc, err
 }
 
@@ -167,7 +170,7 @@ func (c *Client) Block(ctx context.Context, height uint64) (*BlockDocument, erro
 // be reorganized.
 // See https://docs.fastnear.com/neardata/blocks/block-opt
 func (c *Client) BlockOpt(ctx context.Context, height uint64) (*BlockDocument, error) {
-	doc, _, err := get[BlockDocument](c, ctx, "block_opt", []string{"v0", "block_opt", strconv.FormatUint(height, 10)}, false)
+	doc, _, err := get[BlockDocument](ctx, c, "block_opt", []string{"v0", "block_opt", strconv.FormatUint(height, 10)}, false)
 	return doc, err
 }
 
@@ -175,7 +178,7 @@ func (c *Client) BlockOpt(ctx context.Context, height uint64) (*BlockDocument, e
 // light-weight way to watch the chain (~KBs vs ~MBs for Block).
 // See https://docs.fastnear.com/neardata/blocks/headers
 func (c *Client) BlockHeaders(ctx context.Context, height uint64) (*BlockEnvelope, error) {
-	env, _, err := get[BlockEnvelope](c, ctx, "headers", []string{"v0", "block", strconv.FormatUint(height, 10), "headers"}, false)
+	env, _, err := get[BlockEnvelope](ctx, c, "headers", []string{"v0", "block", strconv.FormatUint(height, 10), "headers"}, false)
 	return env, err
 }
 
@@ -183,7 +186,7 @@ func (c *Client) BlockHeaders(ctx context.Context, height uint64) (*BlockEnvelop
 // shardID inside the block at height.
 // See https://docs.fastnear.com/neardata/chunks/chunk
 func (c *Client) Chunk(ctx context.Context, height, shardID uint64) (*ChunkDocument, error) {
-	doc, _, err := get[ChunkDocument](c, ctx, "chunk", []string{"v0", "block", strconv.FormatUint(height, 10), "chunk", strconv.FormatUint(shardID, 10)}, false)
+	doc, _, err := get[ChunkDocument](ctx, c, "chunk", []string{"v0", "block", strconv.FormatUint(height, 10), "chunk", strconv.FormatUint(shardID, 10)}, false)
 	return doc, err
 }
 
@@ -191,6 +194,6 @@ func (c *Client) Chunk(ctx context.Context, height, shardID uint64) (*ChunkDocum
 // receipt execution outcomes and state changes.
 // See https://docs.fastnear.com/neardata/shards/shard
 func (c *Client) Shard(ctx context.Context, height, shardID uint64) (*ShardDocument, error) {
-	doc, _, err := get[ShardDocument](c, ctx, "shard", []string{"v0", "block", strconv.FormatUint(height, 10), "shard", strconv.FormatUint(shardID, 10)}, false)
+	doc, _, err := get[ShardDocument](ctx, c, "shard", []string{"v0", "block", strconv.FormatUint(height, 10), "shard", strconv.FormatUint(shardID, 10)}, false)
 	return doc, err
 }

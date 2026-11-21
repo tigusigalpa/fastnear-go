@@ -92,14 +92,19 @@ func (a *Amount) NEAR() string {
 	if a == nil || a.yocto == nil {
 		return "0"
 	}
-	q, r := new(big.Int).QuoRem(a.yocto, yoctoPerNEAR, new(big.Int))
+	v := new(big.Int).Abs(a.yocto)
+	sign := ""
+	if a.yocto.Sign() < 0 {
+		sign = "-"
+	}
+	q, r := new(big.Int).QuoRem(v, yoctoPerNEAR, new(big.Int))
 	if r.Sign() == 0 {
-		return q.String()
+		return sign + q.String()
 	}
 	frac := r.String()
 	frac = strings.Repeat("0", 24-len(frac)) + frac
 	frac = strings.TrimRight(frac, "0")
-	return q.String() + "." + frac
+	return sign + q.String() + "." + frac
 }
 
 // String returns e.g. "1.5 NEAR".
@@ -107,16 +112,23 @@ func (a *Amount) String() string { return a.NEAR() + " NEAR" }
 
 // Add returns a + b.
 func (a *Amount) Add(b *Amount) *Amount {
-	return &Amount{yocto: new(big.Int).Add(a.yocto, b.yocto)}
+	return &Amount{yocto: new(big.Int).Add(a.integer(), b.integer())}
 }
 
 // Sub returns a - b (may go negative).
 func (a *Amount) Sub(b *Amount) *Amount {
-	return &Amount{yocto: new(big.Int).Sub(a.yocto, b.yocto)}
+	return &Amount{yocto: new(big.Int).Sub(a.integer(), b.integer())}
 }
 
 // Cmp compares a and b: -1, 0 or +1.
-func (a *Amount) Cmp(b *Amount) int { return a.yocto.Cmp(b.yocto) }
+func (a *Amount) Cmp(b *Amount) int { return a.integer().Cmp(b.integer()) }
+
+func (a *Amount) integer() *big.Int {
+	if a == nil || a.yocto == nil {
+		return new(big.Int)
+	}
+	return a.yocto
+}
 
 // IsZero reports whether the amount is zero.
 func (a *Amount) IsZero() bool {
@@ -132,25 +144,37 @@ type TokenAmount struct {
 
 // Format renders the human value truncated to precision fractional
 // digits (never rounded up).
+// A negative precision is treated as zero; invalid Raw values format as "0".
 func (t TokenAmount) Format(precision int) string {
 	v, ok := new(big.Int).SetString(t.Raw, 10)
 	if !ok {
 		return "0"
 	}
 	dec := int(t.Decimals)
+	if precision < 0 {
+		precision = 0
+	}
 	if precision > dec {
 		precision = dec
+	}
+	sign := ""
+	if v.Sign() < 0 {
+		sign = "-"
+		v.Abs(v)
 	}
 	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(dec)), nil)
 	q, r := new(big.Int).QuoRem(v, divisor, new(big.Int))
 	if precision == 0 {
-		return q.String()
+		if q.Sign() == 0 {
+			return "0"
+		}
+		return sign + q.String()
 	}
 	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(dec-precision)), nil)
 	r.Quo(r, scale)
 	frac := r.String()
 	frac = strings.Repeat("0", precision-len(frac)) + frac
-	return q.String() + "." + frac
+	return sign + q.String() + "." + frac
 }
 
 func isDigits(s string) bool {

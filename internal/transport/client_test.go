@@ -3,8 +3,8 @@ package transport
 import (
 	"context"
 	"errors"
+	httptest "github.com/tigusigalpa/fastnear-go/internal/testutil"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,14 +16,14 @@ import (
 func newTestClient(t *testing.T, srv *httptest.Server, mutate func(*Params)) *Client {
 	t.Helper()
 	p := Params{
-		BaseURL:  srv.URL,
+		HTTPClient: srv.Client(), BaseURL: srv.URL,
 		APIKey:   "test-key-1234",
 		Family:   "accounts",
 		Timeout:  5 * time.Second,
 		Retry:    RetryPolicy{MaxRetries: 2, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond, Budget: 10 * time.Second},
 		MaxBytes: 1 << 20,
 	}
-	p.Retry.sleeper = func(ctx context.Context, d time.Duration) error { return nil }
+	p.Retry.sleeper = func(_ context.Context, _ time.Duration) error { return nil }
 	if mutate != nil {
 		mutate(&p)
 	}
@@ -34,7 +34,7 @@ func TestBearerAuthHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv, nil)
@@ -53,7 +53,7 @@ func TestQueryAuthModeAndScrubbing(t *testing.T) {
 			t.Errorf("apiKey not appended")
 		}
 		w.WriteHeader(403)
-		w.Write([]byte(`{"error":"invalid_api_key"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_api_key"}`))
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv, func(p *Params) { p.AuthMode = AuthQuery })
@@ -78,10 +78,10 @@ func TestQueryAuthModeAndScrubbing(t *testing.T) {
 
 func TestQuotaExceededNotRetried(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(402)
-		w.Write([]byte(`{"error":"quota_exceeded"}`))
+		_, _ = w.Write([]byte(`{"error":"quota_exceeded"}`))
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv, nil)
@@ -89,8 +89,8 @@ func TestQuotaExceededNotRetried(t *testing.T) {
 	if err == nil || !fastnearerr.IsQuotaExceeded(err) {
 		t.Fatalf("err = %v", err)
 	}
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1", calls)
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("calls = %d, want 1", atomic.LoadInt32(&calls))
 	}
 	if fastnearerr.IsRetryable(err) {
 		t.Fatal("402 must not be retryable")
@@ -100,18 +100,18 @@ func TestQuotaExceededNotRetried(t *testing.T) {
 func TestRateLimitRetriedWithRetryAfter(t *testing.T) {
 	var calls int32
 	var slept []time.Duration
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := atomic.AddInt32(&calls, 1)
 		if n == 1 {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(429)
 			return
 		}
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv, func(p *Params) {
-		p.Retry.sleeper = func(ctx context.Context, d time.Duration) error {
+		p.Retry.sleeper = func(_ context.Context, d time.Duration) error {
 			slept = append(slept, d)
 			return nil
 		}
@@ -120,8 +120,8 @@ func TestRateLimitRetriedWithRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	if calls != 2 {
-		t.Fatalf("calls = %d", calls)
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("calls = %d", atomic.LoadInt32(&calls))
 	}
 	if len(slept) != 1 || slept[0] != time.Second {
 		t.Fatalf("slept = %v", slept)
@@ -131,7 +131,7 @@ func TestRateLimitRetriedWithRetryAfter(t *testing.T) {
 
 func TestServerErrorRetriedThenFails(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(503)
 	}))
@@ -141,8 +141,8 @@ func TestServerErrorRetriedThenFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if calls != 3 { // 1 + 2 retries
-		t.Fatalf("calls = %d, want 3", calls)
+	if atomic.LoadInt32(&calls) != 3 { // 1 + 2 retries
+		t.Fatalf("calls = %d, want 3", atomic.LoadInt32(&calls))
 	}
 	e, _ := fastnearerr.As(err)
 	if e.StatusCode != 503 || e.Code != "server_error" {
@@ -152,7 +152,7 @@ func TestServerErrorRetriedThenFails(t *testing.T) {
 
 func TestNoRetryOnNonIdempotent(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(500)
 	}))
@@ -162,8 +162,8 @@ func TestNoRetryOnNonIdempotent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1 (send_tx must not be retried)", calls)
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("calls = %d, want 1 (send_tx must not be retried)", atomic.LoadInt32(&calls))
 	}
 }
 
@@ -178,7 +178,7 @@ func TestRedirectFollowedWithAuth(t *testing.T) {
 	mux.HandleFunc("/v0/block/123", func(w http.ResponseWriter, r *http.Request) {
 		finalAuth = r.Header.Get("Authorization")
 		finalPath = r.URL.Path
-		w.Write([]byte(`{"block":{}}`))
+		_, _ = w.Write([]byte(`{"block":{}}`))
 	})
 	defer srv.Close()
 	c := newTestClient(t, srv, nil)
@@ -195,7 +195,7 @@ func TestRedirectFollowedWithAuth(t *testing.T) {
 }
 
 func TestNoFollowRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "/v0/block_opt/456")
 		w.WriteHeader(302)
 	}))
@@ -227,8 +227,8 @@ func TestCrossHostRedirectRefused(t *testing.T) {
 }
 
 func TestResponseTooLarge(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, 2048))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, 2048))
 	}))
 	defer srv.Close()
 	c := newTestClient(t, srv, func(p *Params) { p.MaxBytes = 1024 })
@@ -244,7 +244,7 @@ func TestResponseTooLarge(t *testing.T) {
 
 func TestTimeoutIsRetryable(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		time.Sleep(200 * time.Millisecond)
 	}))
@@ -258,8 +258,8 @@ func TestTimeoutIsRetryable(t *testing.T) {
 	if e == nil || e.Code != "timeout" {
 		t.Fatalf("err = %v", err)
 	}
-	if calls != 3 {
-		t.Fatalf("calls = %d, want 3", calls)
+	if atomic.LoadInt32(&calls) != 3 {
+		t.Fatalf("calls = %d, want 3", atomic.LoadInt32(&calls))
 	}
 }
 

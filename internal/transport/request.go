@@ -24,4 +24,7 @@ type Request struct {
 	// NoFollowRedirect asks the transport to return the 3xx response
 	// untouched (used to read Location without downloading a block).
 	NoFollowRedirect bool
+	// CheckResponse maps protocol errors in an HTTP-success response into
+	// the shared retry policy (used for JSON-RPC errors).
+	CheckResponse func(*Response) error
 }

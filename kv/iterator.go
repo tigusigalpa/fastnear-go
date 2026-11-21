@@ -21,6 +21,7 @@ type Iterator struct {
 	lastToken *string
 	done      bool
 	started   bool
+	seen      map[string]bool
 }
 
 // NewIterator builds an iterator over a page-fetching function.
@@ -36,6 +37,14 @@ func NewIterator(fetch PageFunc, maxPages int) *Iterator {
 func (it *Iterator) Next(ctx context.Context) ([]Entry, bool, error) {
 	if it.done {
 		return nil, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		it.done = true
+		return nil, false, &fastnearerr.Error{Op: family + ".iterate", Family: family, Code: "canceled", Err: err}
+	}
+	if it.fetch == nil {
+		it.done = true
+		return nil, false, fastnearerr.Config(family+".iterate", family, "nil page fetch function")
 	}
 	if it.pages >= it.maxPages {
 		it.done = true
@@ -60,9 +69,15 @@ func (it *Iterator) Next(ctx context.Context) ([]Entry, bool, error) {
 	}
 	it.pages++
 	it.started = true
-	if it.lastToken != nil && page.PageToken != nil && *page.PageToken == *it.lastToken {
+	if page.PageToken != nil && it.seen[*page.PageToken] {
 		it.done = true
 		return nil, false, &fastnearerr.Error{Op: family + ".iterate", Family: family, Code: "pagination_loop", Message: "server returned a repeated page_token"}
+	}
+	if page.PageToken != nil {
+		if it.seen == nil {
+			it.seen = make(map[string]bool)
+		}
+		it.seen[*page.PageToken] = true
 	}
 	it.lastToken = page.PageToken
 	if page.PageToken == nil {
@@ -105,8 +120,11 @@ func Seq(ctx context.Context, fetch PageFunc) iter.Seq2[Entry, error] {
 // LatestByAccountSeq streams all latest entries of a contract.
 func (c *Client) LatestByAccountSeq(ctx context.Context, contractID string, q LatestQuery) iter.Seq2[Entry, error] {
 	return Seq(ctx, func(token *string) (*List, error) {
-		q.PageToken = token
-		return c.LatestByAccount(ctx, contractID, q)
+		pageQuery := q
+		if token != nil {
+			pageQuery.PageToken = token
+		}
+		return c.LatestByAccount(ctx, contractID, pageQuery)
 	})
 }
 
@@ -114,16 +132,22 @@ func (c *Client) LatestByAccountSeq(ctx context.Context, contractID string, q La
 // predecessor.
 func (c *Client) LatestByPredecessorSeq(ctx context.Context, contractID, predecessorID string, q LatestQuery) iter.Seq2[Entry, error] {
 	return Seq(ctx, func(token *string) (*List, error) {
-		q.PageToken = token
-		return c.LatestByPredecessor(ctx, contractID, predecessorID, q)
+		pageQuery := q
+		if token != nil {
+			pageQuery.PageToken = token
+		}
+		return c.LatestByPredecessor(ctx, contractID, predecessorID, pageQuery)
 	})
 }
 
 // HistoryByAccountSeq streams the write history of a contract.
 func (c *Client) HistoryByAccountSeq(ctx context.Context, contractID string, q HistoryQuery) iter.Seq2[Entry, error] {
 	return Seq(ctx, func(token *string) (*List, error) {
-		q.PageToken = token
-		return c.HistoryByAccount(ctx, contractID, q)
+		pageQuery := q
+		if token != nil {
+			pageQuery.PageToken = token
+		}
+		return c.HistoryByAccount(ctx, contractID, pageQuery)
 	})
 }
 
@@ -131,16 +155,22 @@ func (c *Client) HistoryByAccountSeq(ctx context.Context, contractID string, q H
 // one predecessor.
 func (c *Client) HistoryByPredecessorSeq(ctx context.Context, contractID, predecessorID string, q HistoryQuery) iter.Seq2[Entry, error] {
 	return Seq(ctx, func(token *string) (*List, error) {
-		q.PageToken = token
-		return c.HistoryByPredecessor(ctx, contractID, predecessorID, q)
+		pageQuery := q
+		if token != nil {
+			pageQuery.PageToken = token
+		}
+		return c.HistoryByPredecessor(ctx, contractID, predecessorID, pageQuery)
 	})
 }
 
 // HistoryByKeySeq streams the write history of a key.
 func (c *Client) HistoryByKeySeq(ctx context.Context, key string, q HistoryQuery) iter.Seq2[Entry, error] {
 	return Seq(ctx, func(token *string) (*List, error) {
-		q.PageToken = token
-		return c.HistoryByKey(ctx, key, q)
+		pageQuery := q
+		if token != nil {
+			pageQuery.PageToken = token
+		}
+		return c.HistoryByKey(ctx, key, pageQuery)
 	})
 }
 
