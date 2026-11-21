@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-21
+
 ### Fixed
 
+- Align test, lint and coverage workflows with the Go 1.23 minimum requirement.
+- Correct the Go Reference badge and update the SDK User-Agent version.
 - Apply connection timeouts to dialing and TLS, honor proxy environment settings,
   and share the default HTTP connection pool across API families.
 - Preserve redirect restrictions and lightweight height probes with custom HTTP
@@ -38,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration and transaction examples, plus practical scope limitations.
 - Unit HTTP fixtures now use in-memory connections rather than TCP sockets.
 - Corrected the Staticcheck GitHub Action reference in CI.
+- Added a version-driven GitHub release workflow with test and build checks.
 
 ## [1.0.0] - 2026-11-20
 

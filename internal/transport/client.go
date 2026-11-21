@@ -98,7 +98,7 @@ func New(p Params) *Client {
 		c.redirHosts = append(c.redirHosts, strings.ToLower(s))
 	}
 	if c.ua == "" {
-		c.ua = "fastnear-go/1.0.0 (+https://github.com/tigusigalpa/fastnear-go)"
+		c.ua = "fastnear-go/1.0.1 (+https://github.com/tigusigalpa/fastnear-go)"
 	}
 	if c.timeout <= 0 {
 		c.timeout = 30 * time.Second

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - client.go
+      - docs/releases/**
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish SDK release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: '**/go.mod'
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          version=$(sed -n 's/^const Version = "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' client.go)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -s "docs/releases/v${version}.md"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+      - name: Test SDK
+        run: go test -race ./...
+      - name: Build examples
+        working-directory: examples
+        run: go build ./...
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          gh api "repos/${GH_REPO}/releases" > "$RUNNER_TEMP/releases.json"
+          if jq -e --arg tag "$RELEASE_TAG" 'any(.[]; .tag_name == $tag)' "$RUNNER_TEMP/releases.json" > /dev/null; then
+            echo "Release ${RELEASE_TAG} already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "$RELEASE_COMMIT" \
+            --title "FastNear Go ${RELEASE_TAG}" \
+            --notes-file "docs/releases/${RELEASE_TAG}.md" \
+            --latest

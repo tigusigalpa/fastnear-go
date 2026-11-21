@@ -9,7 +9,7 @@ each service keeps its own methods and response types.
 
 [![CI](https://github.com/tigusigalpa/fastnear-go/actions/workflows/ci.yml/badge.svg)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/ci.yml)
 [![Tests](https://github.com/tigusigalpa/fastnear-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/test.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/tigusigalpa/marketaux-go.svg)](https://pkg.go.dev/github.com/tigusigalpa/marketaux-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tigusigalpa/fastnear-go.svg)](https://pkg.go.dev/github.com/tigusigalpa/fastnear-go)
 [![CodeQL](https://github.com/tigusigalpa/fastnear-go/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/fastnear-go/actions/workflows/codeql.yml)
 [![Codecov](https://codecov.io/gh/tigusigalpa/fastnear-go/graph/badge.svg)](https://codecov.io/gh/tigusigalpa/fastnear-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

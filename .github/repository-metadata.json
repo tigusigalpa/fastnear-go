@@ -1,0 +1,20 @@
+{
+  "description": "A Go SDK for FastNear and NEAR Protocol with typed clients for JSON-RPC, indexed accounts, transactions, transfers, block data and KV storage. Includes context support, safe retries, pagination streams, exact balance arithmetic, structured errors, token metadata caching and practical examples. Standard library only; Go 1.23+.",
+  "topics": [
+    "go",
+    "golang",
+    "fastnear",
+    "near",
+    "near-protocol",
+    "blockchain",
+    "web3",
+    "sdk",
+    "api-client",
+    "json-rpc",
+    "near-rpc",
+    "transactions",
+    "pagination",
+    "neardata",
+    "key-value"
+  ]
+}

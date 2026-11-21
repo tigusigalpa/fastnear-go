@@ -17,7 +17,7 @@ import (
 )
 
 // Version is the SDK version sent in User-Agent.
-const Version = "1.0.0"
+const Version = "1.0.1"
 
 const userAgent = "fastnear-go/" + Version + " (+https://github.com/tigusigalpa/fastnear-go)"
 
